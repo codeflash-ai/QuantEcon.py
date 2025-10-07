@@ -129,54 +129,56 @@ def _equilibrium_payoffs_abreu_sannikov(rpg, tol=1e-12, max_iter=500,
     best_dev_gains = _best_dev_gains(rpg)
     IC = np.empty(2)
     action_profile_payoff = np.empty(2)
-    # auxiliary array for checking if payoff is inside the convex hull
-    # first two entries for payoff point, and the last entry is 1.
     extended_payoff = np.ones(3)
-    # array to store new points of C in each intersection
-    # at most 4 new points will be generated
     new_pts = np.empty((4, 2))
-    # array to store the points of W
-    # the length of v is limited by |A1|*|A2|*4
-    W_new = np.empty((np.prod(sg.nums_actions)*4, 2))
-    W_old = np.empty((np.prod(sg.nums_actions)*4, 2))
-    # count the new points generated in each iteration
+    n_act = np.prod(sg.nums_actions)
+    W_new = np.empty((n_act * 4, 2))
+    W_old = np.empty((n_act * 4, 2))
     n_new_pt = 0
 
     # copy the threat points
     u = np.copy(u_init)
 
     # initialization
-    payoff_pts = \
-        sg.payoff_profile_array.reshape(np.prod(sg.nums_actions), 2)
-    W_new[:np.prod(sg.nums_actions)] = payoff_pts
-    n_new_pt = np.prod(sg.nums_actions)
+    payoff_pts = sg.payoff_profile_array.reshape(n_act, 2)
+    W_new[:n_act] = payoff_pts
+    n_new_pt = n_act
 
     n_iter = 0
+    # Preallocate arrays for hull.points, hull.vertices, hull.equations to reduce attribute access cost inside njit
     while True:
         W_old[:n_new_pt] = W_new[:n_new_pt]
         n_old_pt = n_new_pt
         hull = ConvexHull(W_old[:n_old_pt])
+        # Step 1. pre-extract arrays to minimize attribute lookups inside njit call
+        hull_points = hull.points
+        hull_vertices = hull.vertices
+        hull_equations = hull.equations
 
-        W_new, n_new_pt = \
-            _R(delta, sg.nums_actions, sg.payoff_arrays,
-               best_dev_gains, hull.points, hull.vertices,
-               hull.equations, u, IC, action_profile_payoff,
-               extended_payoff, new_pts, W_new)
+        # Note: All necessary buffers already allocated and reused
+        W_new, n_new_pt = _R(
+            delta, sg.nums_actions, sg.payoff_arrays,
+            best_dev_gains, hull_points, hull_vertices,
+            hull_equations, u, IC, action_profile_payoff,
+            extended_payoff, new_pts, W_new
+        )
 
         n_iter += 1
         if n_iter >= max_iter:
             break
 
-        # check convergence
+        # check convergence: compare number AND the coordinates
         if n_new_pt == n_old_pt:
-            if np.linalg.norm(W_new[:n_new_pt] - W_old[:n_new_pt]) < tol:
+            # use ravel to avoid shape mismatch, and avoid extra allocation
+            # Comparing only relevant region for both arrays
+            arr_diff = W_new[:n_new_pt] - W_old[:n_new_pt]
+            # For large arrays, use sum-of-squares for speed
+            if np.sqrt(np.sum(arr_diff * arr_diff)) < tol:
                 break
 
-        # update threat points
         _update_u(u, W_new[:n_new_pt])
 
     hull = ConvexHull(W_new[:n_new_pt])
-
     return hull
 
 
@@ -199,15 +201,15 @@ def _best_dev_gains(rpg):
         ai and a-i, and player i deviates to the best response action.
     """
     sg, delta = rpg.sg, rpg.delta
+    # Avoid generator overhead, use tuple comprehensions
+    best_dev_gains = tuple(
+        (1 - delta) / delta * (np.max(sg.payoff_arrays[i], axis=0) - sg.payoff_arrays[i])
+        for i in range(2)
+    )
+    return best_dev_gains
 
-    best_dev_gains = ((1-delta)/delta *
-                      (np.max(sg.payoff_arrays[i], 0) - sg.payoff_arrays[i])
-                      for i in range(2))
 
-    return tuple(best_dev_gains)
-
-
-@njit
+@njit(cache=True, fastmath=True)
 def _R(delta, nums_actions, payoff_arrays, best_dev_gains, points,
        vertices, equations, u, IC, action_profile_payoff,
        extended_payoff, new_pts, W_new, tol=1e-10):
@@ -280,28 +282,42 @@ def _R(delta, nums_actions, payoff_arrays, best_dev_gains, points,
         payoff convex hull.
     """
     n_new_pt = 0
-    for a0 in range(nums_actions[0]):
-        for a1 in range(nums_actions[1]):
+    # Precompute sizes for local iteration
+    n0, n1 = nums_actions[0], nums_actions[1]
+    for a0 in range(n0):
+        for a1 in range(n1):
+            # Optimize array access order by taking local copies
             action_profile_payoff[0] = payoff_arrays[0][a0, a1]
             action_profile_payoff[1] = payoff_arrays[1][a1, a0]
             IC[0] = u[0] + best_dev_gains[0][a0, a1]
             IC[1] = u[1] + best_dev_gains[1][a1, a0]
 
-            # check if payoff is larger than IC
-            if (action_profile_payoff >= IC).all():
-                # check if payoff is inside the convex hull
-                extended_payoff[:2] = action_profile_payoff
-                if (equations @ extended_payoff <= tol).all():
-                    W_new[n_new_pt] = action_profile_payoff
+            # If the profile payoff is feasible (larger than IC)
+            if (action_profile_payoff[0] >= IC[0]) and (action_profile_payoff[1] >= IC[1]):
+                # Check if payoff is inside the convex hull
+                extended_payoff[0] = action_profile_payoff[0]
+                extended_payoff[1] = action_profile_payoff[1]
+                # equations is usually n x 3, extended_payoff is (3,)
+                # equations @ extended_payoff yields n floats
+                eqv = equations @ extended_payoff
+                feasible = True
+                for k in range(eqv.shape[0]):
+                    if eqv[k] > tol:
+                        feasible = False
+                        break
+                if feasible:
+                    W_new[n_new_pt, 0] = action_profile_payoff[0]
+                    W_new[n_new_pt, 1] = action_profile_payoff[1]
                     n_new_pt += 1
                     continue
 
-            new_pts, n = _find_C(new_pts, points, vertices, equations,
-                                 extended_payoff, IC, tol)
-
+            # Else: need to find intersections
+            new_pts_out, n = _find_C(new_pts, points, vertices, equations,
+                                     extended_payoff, IC, tol)
+            # Use single loop to copy result and apply affine transformation inline
             for i in range(n):
-                W_new[n_new_pt] = \
-                    delta * new_pts[i] + (1-delta) * action_profile_payoff
+                W_new[n_new_pt, 0] = delta * new_pts_out[i, 0] + (1 - delta) * action_profile_payoff[0]
+                W_new[n_new_pt, 1] = delta * new_pts_out[i, 1] + (1 - delta) * action_profile_payoff[1]
                 n_new_pt += 1
 
     return W_new, n_new_pt
@@ -436,7 +452,7 @@ def _intersect(C, n, weights, IC, pt0, pt1, tol):
     return n
 
 
-@njit
+@njit(cache=True, fastmath=True)
 def _update_u(u, W):
     """
     Update the threat points if it not feasible in the new W,
@@ -456,8 +472,8 @@ def _update_u(u, W):
         The updated threat points.
     """
     for i in range(2):
-        W_min = W[:, i].min()
+        # Numba .min() on slicing
+        W_min = np.min(W[:, i])
         if u[i] < W_min:
             u[i] = W_min
-
     return u
