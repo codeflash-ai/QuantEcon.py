@@ -36,19 +36,65 @@ def KMR_Markov_matrix_sequential(N, p, epsilon):
         Markov matrix for the KMR model with simultaneous move
 
     """
+    # Precompute constants
+    N_float = float(N)
+    N_minus_1 = N - 1
+    eps_half = epsilon * 0.5
+    one_minus_eps = 1.0 - epsilon
+
+    # Preallocate result
     P = np.zeros((N+1, N+1), dtype=float)
-    P[0, 0], P[0, 1] = 1 - epsilon * (1/2), epsilon * (1/2)
-    for n in range(1, N):
-        P[n, n-1] = \
-            (n/N) * (epsilon * (1/2) +
-                     (1 - epsilon) * (((n-1)/(N-1) < p) + ((n-1)/(N-1) == p) * (1/2))
-                     )
-        P[n, n+1] = \
-            ((N-n)/N) * (epsilon * (1/2) +
-                         (1 - epsilon) * ((n/(N-1) > p) + (n/(N-1) == p) * (1/2))
-                         )
-        P[n, n] = 1 - P[n, n-1] - P[n, n+1]
-    P[N, N-1], P[N, N] = epsilon * (1/2), 1 - epsilon * (1/2)
+
+    # Set the first and last rows, which have fixed only two possible transitions
+    P[0, 0] = 1.0 - eps_half
+    P[0, 1] = eps_half
+    P[N, N-1] = eps_half
+    P[N, N] = 1.0 - eps_half
+
+    if N < 2:
+        return P  # Main loop does not run if N < 2
+
+    # Vectorize the interior computation as much as possible
+    idx = np.arange(1, N)
+    idx_float = idx.astype(float)
+
+    prob_down = (idx - 1) / N_minus_1  # Shape (N-1,)
+    prob_up = idx / N_minus_1
+
+    # Compute comparisons all at once using NumPy vectorized comparisons; results are boolean arrays
+    prob_down_lt_p = (prob_down < p)
+    prob_down_eq_p = (prob_down == p)
+    prob_up_gt_p = (prob_up > p)
+    prob_up_eq_p = (prob_up == p)
+
+    # Calculate off-diagonal probabilities in vectorized form
+    coeff_down = idx_float / N_float
+    coeff_up = (N_float - idx_float) / N_float
+
+    # Exploit booleans: True==1, False==0
+    # For each n in 1..N-1
+    Pn_n_minus_1 = coeff_down * (
+        eps_half
+        + one_minus_eps * (
+            prob_down_lt_p.astype(float) + prob_down_eq_p.astype(float) * 0.5
+        )
+    )
+
+    Pn_n_plus_1 = coeff_up * (
+        eps_half
+        + one_minus_eps * (
+            prob_up_gt_p.astype(float) + prob_up_eq_p.astype(float) * 0.5
+        )
+    )
+
+    # Diagonal: 1 - sum of the other two
+    Pn_n = 1.0 - Pn_n_minus_1 - Pn_n_plus_1
+
+    # Assign results into matrix all at once
+    P[idx, idx-1] = Pn_n_minus_1
+    P[idx, idx+1] = Pn_n_plus_1
+    P[idx, idx] = Pn_n
+
     return P
 
 
