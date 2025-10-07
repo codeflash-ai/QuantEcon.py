@@ -7,7 +7,6 @@ response correspondence.
 import numbers
 import numpy as np
 from .._compute_fp import _compute_fixed_point_ig
-from .normal_form_game import pure2mixed
 from .utilities import NashResult
 
 
@@ -287,10 +286,9 @@ def _flatten_action_profile(action_profile, indptr):
 
     for i in range(N):
         if isinstance(action_profile[i], numbers.Integral):  # pure action
-            num_actions = indptr[i+1] - indptr[i]
-            mixed_action = pure2mixed(num_actions, action_profile[i])
+            out[indptr[i]:indptr[i+1]] = 0
+            out[indptr[i] + action_profile[i]] = 1
         else:  # mixed action
-            mixed_action = action_profile[i]
-        out[indptr[i]:indptr[i+1]] = mixed_action
+            out[indptr[i]:indptr[i+1]] = action_profile[i]
 
     return out
