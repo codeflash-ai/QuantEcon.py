@@ -6,7 +6,7 @@ import warnings
 from . import _ce_util
 
 
-__all__ = ['ckron', 'gridmake']
+__all__ = ('ckron', 'gridmake')
 
 
 def __dir__():
