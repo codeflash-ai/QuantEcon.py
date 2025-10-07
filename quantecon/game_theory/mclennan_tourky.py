@@ -255,8 +255,10 @@ def _get_action_profile(x, indptr):
 
     """
     N = len(indptr) - 1
-    action_profile = tuple(x[indptr[i]:indptr[i+1]] for i in range(N))
-    return action_profile
+    # Use list comprehension and tuple constructor for better performance than tuple(genexp)
+    # Avoid repeated attribute access
+    sliced = [x[start:end] for start, end in zip(indptr[:-1], indptr[1:])]
+    return tuple(sliced)
 
 
 def _flatten_action_profile(action_profile, indptr):
