@@ -42,20 +42,34 @@ class IVP(integrate.ode):
     """
 
     def __init__(self, f, jac=None):
-
         super(IVP, self).__init__(f, jac)
 
     def _integrate_fixed_trajectory(self, h, T, step, relax):
         """Generates a solution trajectory of fixed length."""
         # initialize the solution using initial condition
-        solution = np.hstack((self.t, self.y))
-
+        y0 = self.y
+        # Efficient pre-allocation: Estimate max possible steps and grow if needed
+        # This avoids O(n^2) cost of repeated np.vstack, while retaining exact output
+        t0_dtype = type(self.t)
+        y_dtype = y0.dtype if hasattr(y0, "dtype") else type(y0[0])
+        y_shape = np.shape(y0)
+        # Each "row" in output has shape (1 + y.size,)
+        n_y = np.size(y0)
+        chunk = 128
+        max_steps = chunk
+        sol = np.empty((max_steps, 1 + n_y), dtype=np.result_type(self.t, y0))
+        sol[0, 0] = self.t
+        sol[0, 1:] = np.asarray(self.y).ravel()
+        idx = 1  # Position to write the next solution
+        
         while self.successful():
-
             self.integrate(self.t + h, step, relax)
-            current_step = np.hstack((self.t, self.y))
-            solution = np.vstack((solution, current_step))
-
+            if idx >= sol.shape[0]:
+                # Grow the output array by another chunk when needed
+                sol = np.resize(sol, (sol.shape[0] + chunk, 1 + n_y))
+            sol[idx, 0] = self.t
+            sol[idx, 1:] = np.asarray(self.y).ravel()
+            idx += 1
             if (h > 0) and (self.t >= T):
                 break
             elif (h < 0) and (self.t <= T):
@@ -63,7 +77,10 @@ class IVP(integrate.ode):
             else:
                 continue
 
-        return solution
+        # Trim unused rows before return
+        if idx < sol.shape[0]:
+            sol = sol[:idx]
+        return sol
 
     def _integrate_variable_trajectory(self, h, g, tol, step, relax):
         """Generates a solution trajectory of variable length."""
