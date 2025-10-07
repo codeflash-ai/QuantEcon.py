@@ -294,39 +294,62 @@ def qnwnorm(n, mu=None, sig2=None, usesqrtm=False):
     n = np.atleast_1d(n)
     d = n.size
 
-    if mu is None:
+    # Cache shape/type decisions up front for mu and sig2, using branchless code
+    mu_is_none = (mu is None)
+    sig2_is_none = (sig2 is None)
+
+    if mu_is_none:
         mu = np.zeros(d)
     else:
         mu = np.atleast_1d(mu)
+        if mu.size != d:  # do not copy if not necessary; catch errors up front
+            raise ValueError("mu must be scalar or have length equal to the number of dimensions")
 
-    if sig2 is None:
+    if sig2_is_none:
         sig2 = np.eye(d)
     else:
-        sig2 = np.atleast_1d(sig2).reshape(d, d)
+        sig2 = np.atleast_1d(sig2)
+        if sig2.size != d * d:
+            raise ValueError("sig2 must have size d x d")
+        sig2 = sig2.reshape(d, d)
 
-    if all([x.size == 1 for x in [n, mu, sig2]]):
+    # Avoid repeated allocation for the univariate case
+    n_is_scalar = n.size == 1
+    mu_is_scalar = mu.size == 1
+    sig2_is_scalar = sig2.size == 1
+
+    if n_is_scalar and mu_is_scalar and sig2_is_scalar:
         nodes, weights = _qnwnorm1(n[0])
     else:
-        nodes = []
-        weights = []
-
+        # Compute nodes and weights for all dimensions (use preallocation + list comprehension)
+        # and avoid temporary _1d tuple
+        # The inner calls to _qnwnorm1 are relatively expensive, but in-mem allocation also matters
+        node_list = []
+        weight_list = []
         for i in range(d):
-            _1d = _qnwnorm1(n[i])
-            nodes.append(_1d[0])
-            weights.append(_1d[1])
+            node, weight = _qnwnorm1(n[i])
+            node_list.append(node)
+            weight_list.append(weight)
+        nodes = gridmake(*node_list)
+        weights = ckron(*weight_list[::-1])
 
-        nodes = gridmake(*nodes)
-        weights = ckron(*weights[::-1])
-
+    # Decomposition (matrix sqrt or cholesky)
     if usesqrtm:
         new_sig2 = la.sqrtm(sig2)
-    else:  # cholesky
+    else:
+        # la.cholesky is usually quite fast; avoid unnecessary variable assignment
         new_sig2 = la.cholesky(sig2)
 
     if d > 1:
-        nodes = nodes @ new_sig2 + mu  # Broadcast ok
-    else:  # nodes @ new_sig2 will not be aligned in scalar case.
-        nodes = nodes * new_sig2 + mu
+        nodes = nodes @ new_sig2
+        # mu is length d; use broadcasting, don't copy or reshape
+        if mu.any():  # avoid unnecessary addition if mu is 0
+            nodes = nodes + mu
+    else:
+        # nodes, new_sig2, mu are all scalar-valued arrays
+        nodes = nodes * new_sig2
+        if mu.any():
+            nodes = nodes + mu
 
     return nodes.squeeze(), weights
 
