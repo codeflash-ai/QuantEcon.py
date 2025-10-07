@@ -14,15 +14,16 @@ def __dir__():
 
 
 def __getattr__(name):
-    if name not in __all__:
+    if name != "RBLQ":
         raise AttributeError(
-                "`quantecon.robustlq` is deprecated and has no attribute "
-                f"'{name}'."
-            )
-
-    warnings.warn(f"Please use `{name}` from the `quantecon` namespace, the"
-                  "`quantecon.robustlq` namespace is deprecated. You can use"
-                  f" the following instead:\n `from quantecon import {name}`.",
-                  category=DeprecationWarning, stacklevel=2)
-
-    return getattr(_robustlq, name)
+            "`quantecon.robustlq` is deprecated and has no attribute "
+            f"'{name}'."
+        )
+    # Message construction merged for slightly faster performance
+    warnings.warn(
+        "Please use `RBLQ` from the `quantecon` namespace, the"
+        " `quantecon.robustlq` namespace is deprecated. You can use"
+        " the following instead:\n `from quantecon import RBLQ`.",
+        category=DeprecationWarning, stacklevel=2
+    )
+    return getattr(_robustlq, "RBLQ")
