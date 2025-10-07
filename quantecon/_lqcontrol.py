@@ -235,7 +235,8 @@ class LQ:
         Q, R, A, B, N, C = self.Q, self.R, self.A, self.B, self.N, self.C
 
         # === solve Riccati equation, obtain P === #
-        A0, B0 = np.sqrt(self.beta) * A, np.sqrt(self.beta) * B
+        sqrt_beta = np.sqrt(self.beta)
+        A0, B0 = sqrt_beta * A, sqrt_beta * B
         P = solve_discrete_riccati(A0, B0, R, Q, N, method=method)
 
         # == Compute F == #
