@@ -34,7 +34,8 @@ class DiscreteRV:
         return "DiscreteRV with {n} elements".format(n=self._q.size)
 
     def __str__(self):
-        return self.__repr__()
+        # Directly inline the representation for slightly faster access
+        return f"DiscreteRV with {self._q.size} elements"
 
     @property
     def q(self):
