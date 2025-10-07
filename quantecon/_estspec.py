@@ -3,7 +3,6 @@ Functions for working with periodograms of scalar data.
 
 """
 import numpy as np
-from numpy.fft import fft
 
 
 def smooth(x, window_len=7, window='hanning'):
@@ -33,7 +32,8 @@ def smooth(x, window_len=7, window='hanning'):
     in each direction.
 
     """
-    if len(x) < window_len:
+    n = len(x)
+    if n < window_len:
         raise ValueError("Input vector length must be >= window length.")
 
     if window_len < 3:
@@ -43,32 +43,38 @@ def smooth(x, window_len=7, window='hanning'):
         window_len += 1
         print("Window length reset to {}".format(window_len))
 
-    windows = {'hanning': np.hanning,
-               'hamming': np.hamming,
-               'bartlett': np.bartlett,
-               'blackman': np.blackman,
-               'flat': np.ones  # moving average
-               }
-
-    # === Reflect x around x[0] and x[-1] prior to convolution === #
-    k = int(window_len / 2)
-    xb = x[:k]   # First k elements
-    xt = x[-k:]  # Last k elements
-    s = np.concatenate((xb[::-1], x, xt[::-1]))
-
-    # === Select window values === #
-    if window in windows.keys():
-        w = windows[window](window_len)
+    # Use direct lookup for performance
+    if window == 'hanning':
+        w = np.hanning(window_len)
+    elif window == 'hamming':
+        w = np.hamming(window_len)
+    elif window == 'bartlett':
+        w = np.bartlett(window_len)
+    elif window == 'blackman':
+        w = np.blackman(window_len)
+    elif window == 'flat':
+        w = np.ones(window_len, dtype=float)
     else:
         msg = "Unrecognized window type '{}'".format(window)
         print(msg + " Defaulting to hanning")
-        w = windows['hanning'](window_len)
+        w = np.hanning(window_len)
 
-    return np.convolve(w / w.sum(), s, mode='valid')
+    # === Efficient reflection extension (avoid slicing temp arrays) === #
+    k = window_len // 2
+    # Use np.empty for concat and assign slices instead of multiple arrays and concatenation
+    s = np.empty(n + 2 * k, dtype=x.dtype)
+    s[:k] = x[k-1::-1]
+    s[k:k+n] = x
+    s[k+n:] = x[:-k-1:-1]
+
+    # Precompute normalized window for convolution (avoid division in np.convolve)
+    w_norm = w / w.sum()
+    # Convolve directly using mode='valid'; output is always shape (n,)
+    return np.convolve(s, w_norm, mode='valid')
 
 
 def periodogram(x, window=None, window_len=7):
-    r"""
+    """
     Computes the periodogram
 
     .. math::
@@ -100,11 +106,14 @@ def periodogram(x, window=None, window_len=7):
 
     """
     n = len(x)
-    I_w = np.abs(fft(x))**2 / n
-    w = 2 * np.pi * np.arange(n) / n  # Fourier frequencies
-    w, I_w = w[:int(n/2)+1], I_w[:int(n/2)+1]  # Take only values on [0, pi]
+    # Use rfft for real input to halve computation and memory
+    I_w = np.abs(np.fft.rfft(x)) ** 2 / n
+    w = 2 * np.pi * np.arange(I_w.shape[0]) / n  # Only up to n//2 (real output)
+
     if window:
+        # Use windowed smoothing directly on the [0, pi] region
         I_w = smooth(I_w, window_len=window_len, window=window)
+
     return w, I_w
 
 
