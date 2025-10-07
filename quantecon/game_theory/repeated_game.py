@@ -199,12 +199,18 @@ def _best_dev_gains(rpg):
         ai and a-i, and player i deviates to the best response action.
     """
     sg, delta = rpg.sg, rpg.delta
+    payoff_arrays = sg.payoff_arrays
 
-    best_dev_gains = ((1-delta)/delta *
-                      (np.max(sg.payoff_arrays[i], 0) - sg.payoff_arrays[i])
-                      for i in range(2))
+    # Precompute coefficient
+    coeff = (1 - delta) / delta
 
-    return tuple(best_dev_gains)
+    # For each player, rapidly compute the best deviation gain using optimal axis parameterization
+    # np.max() over axis=0 gives the best response for each (a-i)
+    # No need to build generator, directly construct tuple for efficiency
+    return (
+        coeff * (np.max(payoff_arrays[0], axis=0) - payoff_arrays[0]),
+        coeff * (np.max(payoff_arrays[1], axis=0) - payoff_arrays[1])
+    )
 
 
 @njit
