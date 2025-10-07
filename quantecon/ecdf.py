@@ -14,15 +14,15 @@ def __dir__():
 
 
 def __getattr__(name):
-    if name not in __all__:
+    if name != 'ECDF':
         raise AttributeError(
                 "`quantecon.ecdf` is deprecated and has no attribute "
                 f"'{name}'."
             )
 
-    warnings.warn(f"Please use `{name}` from the `quantecon` namespace, "
+    warnings.warn("Please use `ECDF` from the `quantecon` namespace, "
                   "the `quantecon.ecdf` namespace is deprecated. You can use "
-                  f"the following instead:\n `from quantecon import {name}`.",
+                  "the following instead:\n `from quantecon import ECDF`.",
                   category=DeprecationWarning, stacklevel=2)
 
-    return getattr(_ecdf, name)
+    return _ecdf.ECDF
