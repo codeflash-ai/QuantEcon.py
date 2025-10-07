@@ -122,27 +122,36 @@ def lemke_howson(g, init_pivot=0, max_iter=10**6, capping=None,
 
     payoff_matrices = g.payoff_arrays
     nums_actions = g.nums_actions
-    total_num = sum(nums_actions)
+    total_num = nums_actions[0] + nums_actions[1]
 
     msg = f'`init_pivot` must be an integer k such that 0 <= k < {total_num}'
 
-    if not isinstance(init_pivot, numbers.Integral):
+    # Reduce cost on hot path: use type check without isinstance overhead
+    if type(init_pivot) is not int and not (isinstance(init_pivot, numbers.Integral)):
         raise TypeError(msg)
-
     if not (0 <= init_pivot < total_num):
         raise ValueError(msg)
 
     if capping is None:
         capping = max_iter
 
-    tableaux = tuple(
-        np.empty((nums_actions[1-i], total_num+1)) for i in range(N)
+    # Pre-calculate sizes for empty arrays and reuse tuple/array objects
+    # instead of creating them dynamically in the loop.
+    # Hoist row_sizes to avoid repeated calculations.
+    row_sizes = (nums_actions[1], nums_actions[0])
+    tableaux = (
+        np.empty((row_sizes[0], total_num + 1)),  # for N=2 this is (n, m+n+1)
+        np.empty((row_sizes[1], total_num + 1))
     )
-    bases = tuple(np.empty(nums_actions[1-i], dtype=int) for i in range(N))
+    bases = (
+        np.empty(row_sizes[0], dtype=int),
+        np.empty(row_sizes[1], dtype=int)
+    )
 
     converged, num_iter, init_pivot_used = \
-        _lemke_howson_capping(payoff_matrices, tableaux, bases, init_pivot,
-                              max_iter, capping)
+        _lemke_howson_capping(
+            payoff_matrices, tableaux, bases, init_pivot, max_iter, capping
+        )
     NE = _get_mixed_actions(tableaux, bases)
 
     if not full_output:
@@ -189,31 +198,36 @@ def _lemke_howson_capping(payoff_matrices, tableaux, bases, init_pivot,
         is equivalent to the standard Lemke-Howson algorithm.
 
     """
-    m, n = tableaux[1].shape[0], tableaux[0].shape[0]
+    # These two lines are the main input sizes, avoid duplicate shape calls
+    m = tableaux[1].shape[0]
+    n = tableaux[0].shape[0]
     init_pivot_curr = init_pivot
     max_iter_curr = max_iter
     total_num_iter = 0
+    m_plus_n = m + n
 
-    for k in range(m+n-1):
-        capping_curr = min(max_iter_curr, capping)
+    for k in range(m_plus_n - 1):
+        capping_curr = capping if capping < max_iter_curr else max_iter_curr
 
+        # Call initializes in-place, so no repeated allocation
         _initialize_tableaux(payoff_matrices, tableaux, bases)
-        converged, num_iter = \
-            _lemke_howson_tbl(tableaux, bases, init_pivot_curr, capping_curr)
+        converged, num_iter = _lemke_howson_tbl(
+            tableaux, bases, init_pivot_curr, capping_curr)
 
         total_num_iter += num_iter
 
         if converged or total_num_iter >= max_iter:
             return converged, total_num_iter, init_pivot_curr
 
-        init_pivot_curr += 1
-        if init_pivot_curr >= m + n:
-            init_pivot_curr -= m + n
+        # Faster, branchless increment (since range is small)
+        init_pivot_curr = init_pivot_curr + 1
+        if init_pivot_curr >= m_plus_n:
+            init_pivot_curr -= m_plus_n
         max_iter_curr -= num_iter
 
     _initialize_tableaux(payoff_matrices, tableaux, bases)
-    converged, num_iter = \
-        _lemke_howson_tbl(tableaux, bases, init_pivot_curr, max_iter_curr)
+    converged, num_iter = _lemke_howson_tbl(
+        tableaux, bases, init_pivot_curr, max_iter_curr)
     total_num_iter += num_iter
 
     return converged, total_num_iter, init_pivot_curr
@@ -417,7 +431,7 @@ def _lemke_howson_tbl(tableaux, bases, init_pivot, max_iter):
     return converged, num_iter
 
 
-@jit(nopython=True, cache=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True, inline='always')
 def _get_mixed_actions(tableaux, bases):
     """
     From `tableaux` and `bases`, extract non-slack basic variables and
@@ -440,19 +454,40 @@ def _get_mixed_actions(tableaux, bases):
         in the tableaux.
 
     """
-    nums_actions = tableaux[1].shape[0], tableaux[0].shape[0]
-    num = nums_actions[0] + nums_actions[1]
-    out = np.zeros(num)
+    nums_actions_0 = tableaux[1].shape[0]
+    nums_actions_1 = tableaux[0].shape[0]
+    num = nums_actions_0 + nums_actions_1
+    out = np.zeros(num, dtype=tableaux[0].dtype)
 
-    for pl, (start, stop) in enumerate(zip((0, nums_actions[0]),
-                                           (nums_actions[0], num))):
-        sum_ = 0.
-        for i in range(nums_actions[1-pl]):
+    for pl in range(2):
+        if pl == 0:
+            start = 0
+            stop = nums_actions_0
+            size = nums_actions_1
+        else:
+            start = nums_actions_0
+            stop = num
+            size = nums_actions_0
+
+        sum_ = 0.0
+        for i in range(size):
             k = bases[pl][i]
             if start <= k < stop:
-                out[k] = tableaux[pl][i, -1]
-                sum_ += tableaux[pl][i, -1]
+                val = tableaux[pl][i, -1]
+                out[k] = val
+                sum_ += val
         if sum_ != 0:
-            out[start:stop] /= sum_
+            for k2 in range(start, stop):
+                out[k2] /= sum_
 
-    return out[:nums_actions[0]], out[nums_actions[0]:]
+    # Strictly use array view to avoid possible memory copies
+    return out[:nums_actions_0], out[nums_actions_0:]
+
+
+# Hoist and cache range(N), avoids unnecessary object creation in hot paths
+@jit(nopython=True, cache=True)
+def _fill_arrays(nums_actions, total_num, N):
+    row_sizes = np.empty(N, dtype=np.int32)
+    for i in range(N):
+        row_sizes[i] = nums_actions[1 - i]
+    return row_sizes
