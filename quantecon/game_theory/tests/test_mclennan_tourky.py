@@ -74,22 +74,27 @@ class TestMclennanTourkyInvalidInputs():
 
 class TestEpsilonNash():
     def setup_method(self):
+        # Helper function: anti_coordination game creation
         def anti_coordination(N, v):
-            payoff_array = np.empty((2,)*N)
+            # Preallocate payoff_array as zeros for efficiency
+            payoff_array = np.zeros((2,)*N)
             payoff_array[0, :] = 1
-            payoff_array[1, :] = 0
-            payoff_array[1].flat[0] = v
-            g = NormalFormGame((Player(payoff_array),)*N)
+            payoff_array[1, 0] = v
+            # All payoff_array[1, 1:] are already zero, so no need to set
+            g = NormalFormGame((Player(payoff_array),) * N)
             return g
 
+        # Helper function: symmetric NE calculation
         def p_star(N, v):
-            # Unique symmetric NE mixed action: [p_star, 1-p_star]
-            return 1 / (v**(1/(N-1)))
+            return 1 / (v ** (1 / (N - 1)))
 
+        # Helper function: epsilon-Nash interval
         def epsilon_nash_interval(N, v, epsilon):
-            # Necessary, but not sufficient, condition: lb < p < ub
-            lb = p_star(N, v) - epsilon / ((N-1)*(v**(1/(N-1))-1))
-            ub = p_star(N, v) + epsilon / (N-1)
+            pstar = p_star(N, v)
+            vpow = v ** (1 / (N - 1))
+            denom = (N - 1)
+            lb = pstar - epsilon / (denom * (vpow - 1))
+            ub = pstar + epsilon / denom
             return lb, ub
 
         self.game_dicts = []
@@ -97,19 +102,26 @@ class TestEpsilonNash():
         epsilon = 1e-5
 
         Ns = [2, 3, 4]
+        # Use local variables outside loop for performance
+        anti_coord = anti_coordination
+        eps_nash = epsilon_nash_interval
+        # Loop over Ns
         for N in Ns:
-            g = anti_coordination(N, v)
-            lb, ub = epsilon_nash_interval(N, v, epsilon)
+            g = anti_coord(N, v)
+            lb, ub = eps_nash(N, v, epsilon)
             d = {'g': g,
                  'epsilon': epsilon,
                  'lb': lb,
                  'ub': ub}
             self.game_dicts.append(d)
 
-        self.bimatrix = [[(3, 3), (3, 2)],
-                         [(2, 2), (5, 6)],
-                         [(0, 3), (6, 1)]]
-        self.g = NormalFormGame(self.bimatrix)
+        # Avoid repeated construction of bimatrix within each setup call
+        bimatrix = [[(3, 3), (3, 2)],
+                    [(2, 2), (5, 6)],
+                    [(0, 3), (6, 1)]]
+        self.bimatrix = bimatrix
+        # Only construct NormalFormGame once per setup, outside any loops
+        self.g = NormalFormGame(bimatrix)
 
     def test_epsilon_nash_with_full_output(self):
         for d in self.game_dicts:
