@@ -47,19 +47,44 @@ def KMR_Markov_matrix_sequential(N, p, epsilon):
     References:
         KMRMarkovMatrixSequential is contributed from https://github.com/oyamad
     """
+    # Precompute constants
+    half_epsilon = 0.5 * epsilon
+    one_minus_epsilon = 1.0 - epsilon
+    N_float = float(N)
+    N_minus_1 = N - 1
+
     P = np.zeros((N+1, N+1), dtype=float)
-    P[0, 0], P[0, 1] = 1 - epsilon * (1/2), epsilon * (1/2)
-    for n in range(1, N):
-        P[n, n-1] = \
-            (n/N) * (epsilon * (1/2) +
-                     (1 - epsilon) * (((n-1)/(N-1) < p) + ((n-1)/(N-1) == p) * (1/2))
-                     )
-        P[n, n+1] = \
-            ((N-n)/N) * (epsilon * (1/2) +
-                         (1 - epsilon) * ((n/(N-1) > p) + (n/(N-1) == p) * (1/2))
-                         )
-        P[n, n] = 1 - P[n, n-1] - P[n, n+1]
-    P[N, N-1], P[N, N] = epsilon * (1/2), 1 - epsilon * (1/2)
+    P[0, 0] = 1.0 - half_epsilon
+    P[0, 1] = half_epsilon
+
+    if N_minus_1 > 0:
+        idx = np.arange(1, N)
+        idx_float = idx.astype(float)
+        idx_minus1_float = (idx - 1).astype(float)
+
+        # (n-1)/(N-1)
+        n1_frac = idx_minus1_float / N_minus_1
+        cond_left = n1_frac < p
+        cond_eq_left = n1_frac == p
+
+        left_term = cond_left.astype(float) + cond_eq_left.astype(float) * 0.5
+        P_left = (idx_float / N_float) * (half_epsilon + one_minus_epsilon * left_term)
+
+        # n/(N-1)
+        n_frac = idx_float / N_minus_1
+        cond_right = n_frac > p
+        cond_eq_right = n_frac == p
+
+        right_term = cond_right.astype(float) + cond_eq_right.astype(float) * 0.5
+        P_right = ((N_float - idx_float) / N_float) * (half_epsilon + one_minus_epsilon * right_term)
+
+        P[idx, idx - 1] = P_left
+        P[idx, idx + 1] = P_right
+        P[idx, idx] = 1.0 - P_left - P_right
+
+    # Final row assignment
+    P[N, N-1] = half_epsilon
+    P[N, N] = 1.0 - half_epsilon
     return P
 
 
