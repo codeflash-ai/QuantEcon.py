@@ -14,7 +14,7 @@ def __dir__():
 
 
 def __getattr__(name):
-    if name not in __all__:
+    if name != 'nnash':
         raise AttributeError(
                 "`quantecon.lqnash` is deprecated and has no attribute "
                 f"'{name}'."
@@ -25,4 +25,4 @@ def __getattr__(name):
                   f" the following instead:\n `from quantecon import {name}`.",
                   category=DeprecationWarning, stacklevel=2)
 
-    return getattr(_lqnash, name)
+    return _lqnash.nnash
