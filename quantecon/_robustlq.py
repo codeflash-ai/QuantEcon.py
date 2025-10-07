@@ -70,11 +70,7 @@ class RBLQ:
         self.beta, self.theta = beta, theta
         # == Check for case of no control (pure forecasting problem) == #
         self.pure_forecasting = True if not Q.any() and not B.any() else False
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __str__(self):
+        
         m = """\
         Robust linear quadratic control system
           - beta (discount parameter)   : {b}
@@ -83,8 +79,14 @@ class RBLQ:
           - k (number of control variables) : {k}
           - j (number of shocks)            : {j}
         """
-        return dedent(m.format(b=self.beta, n=self.n, k=self.k, j=self.j,
+        self._str_repr = dedent(m.format(b=self.beta, n=self.n, k=self.k, j=self.j,
                                th=self.theta))
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return self._str_repr
 
     def d_operator(self, P):
         r"""
