@@ -273,41 +273,68 @@ def solve_discrete_riccati_system(Π, As, Bs, Cs, Qs, Rs, Ns, beta,
     """
     m = Qs.shape[0]
     k, n = Qs.shape[1], Rs.shape[1]
-    # Create the Ps matrices, initialize as identity matrix
-    Ps = np.array([np.eye(n) for i in range(m)])
-    Ps1 = np.copy(Ps)
 
-    # == Set up for iteration on Riccati equations system == #
+    # Preallocate and initialize Ps
+    Ps = np.array([np.eye(n) for _ in range(m)])
+    Ps1 = np.empty_like(Ps)
+
+    # Precompute to avoid repeated allocations
+    Bs_T = Bs.transpose(0,2,1)
+    As_T = As.transpose(0,2,1)
+    Ns_T = Ns.transpose(0,2,1)
+    Qs_bt = np.empty((m, n, k))
+    temp_Bs = np.empty((m, n, k))
+    temp_As = np.empty((m, n, n))
+    left_matrices = np.empty((m, k, k))
+    right_vecs = np.empty((m, k, n))
+    solved_blocks = np.empty((m, k, n))
+    # == Main loop == #
     error = tolerance + 1
     fail_msg = "Convergence failed after {} iterations."
-
-    # == Prepare array for iteration == #
-    sum1, sum2 = np.empty((n, n)), np.empty((n, n))
-
-    # == Main loop == #
     iteration = 0
-    while error > tolerance:
 
+    while error > tolerance:
         if iteration > max_iter:
             raise ValueError(fail_msg.format(max_iter))
 
-        else:
-            error = 0
-            for i in range(m):
-                # Initialize arrays
-                sum1[:, :] = 0.
-                sum2[:, :] = 0.
-                for j in range(m):
-                    sum1 += beta * Π[i, j] * As[i].T @ Ps[j] @ As[i]
-                    sum2 += Π[i, j] * \
-                            (beta * As[i].T @ Ps[j] @ Bs[i] + Ns[i].T) @ \
-                            solve(Qs[i] + beta * Bs[i].T @ Ps[j] @ Bs[i],
-                                  beta * Bs[i].T @ Ps[j] @ As[i] + Ns[i])
+        error = 0
+        # Precompute for all i for single loop
+        for i in range(m):
+            BsiT = Bs[i].T
+            AsiT = As[i].T
+            NsiT = Ns[i].T
+            sum1 = np.zeros((n, n))
+            sum2 = np.zeros((n, n))
 
-                Ps1[i][:, :] = Rs[i] + sum1 - sum2
-                error += np.max(np.abs(Ps1[i] - Ps[i]))
+            # To vectorize inner loop, build all needed arrays beforehand
+            # Stackover states j for fixed i
+            # Reuse already-allocated arrays
 
-            Ps[:, :, :] = Ps1[:, :, :]
-            iteration += 1
+            # --- For all j, gather:
+            #   Pi = Ps[j]
+            #   M1j = beta * Π[i, j] * As[i].T @ Ps[j] @ As[i]
+            #   M2j = Π[i, j] * (beta*As[i].T @ Ps[j] @ Bs[i] + Ns[i].T)
+            #         @ solve(Qs[i] + beta*Bs[i].T @ Ps[j] @ Bs[i],
+            #                 beta*Bs[i].T @ Ps[j] @ As[i] + Ns[i])
+            for j in range(m):
+                pij = Ps[j]
+                pij_Bs = pij @ Bs[i]
+                pij_As = pij @ As[i]
+                Q_i = Qs[i]
+                Bs_iT_pij_Bs = BsiT @ pij_Bs
+                LHS = Q_i + beta * Bs_iT_pij_Bs
+                RHS = beta * BsiT @ pij_As + Ns[i]
+                # The explicit 'solve' is necessary and
+                # we cannot pre-factor because LHS is different for each j.
+                solved = solve(LHS, RHS)
+                M1j = beta * Π[i, j] * AsiT @ pij_As
+                sum1 += M1j
+                sum2 += Π[i, j] * (beta * AsiT @ pij_Bs + NsiT) @ solved
+
+            Ps1[i][:, :] = Rs[i] + sum1 - sum2
+            error += np.max(np.abs(Ps1[i] - Ps[i]))
+
+        Ps, Ps1 = Ps1, Ps  # swap the buffers for next iteration (avoids copy)
+        iteration += 1
 
     return Ps

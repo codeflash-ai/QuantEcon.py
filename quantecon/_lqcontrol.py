@@ -6,7 +6,7 @@ linear quadratic control problems.
 """
 from textwrap import dedent
 import numpy as np
-from scipy.linalg import solve
+from scipy.linalg import lu_factor, lu_solve, solve
 from ._matrix_eqn import solve_discrete_riccati, solve_discrete_riccati_system
 from .util import check_random_state
 from .markov import MarkovChain
@@ -427,26 +427,20 @@ class LQMarkov:
 
     def __init__(self, Π, Qs, Rs, As, Bs, Cs=None, Ns=None, beta=1):
 
-        # == Make sure all matrices for each state are 2D arrays == #
         def converter(Xs):
             return np.array([np.atleast_2d(np.asarray(X, dtype='float'))
                              for X in Xs])
         self.As, self.Bs, self.Qs, self.Rs = list(map(converter,
                                                       (As, Bs, Qs, Rs)))
 
-        # == Record number of states == #
         self.m = self.Qs.shape[0]
-        # == Record dimensions == #
         self.k, self.n = self.Qs.shape[1], self.Rs.shape[1]
 
         if Ns is None:
-            # == No cross product term in payoff. Set N=0. == #
             Ns = [np.zeros((self.k, self.n)) for i in range(self.m)]
-
         self.Ns = converter(Ns)
 
         if Cs is None:
-            # == If C not given, then model is deterministic. Set C=0. == #
             self.j = 1
             Cs = [np.zeros((self.n, self.j)) for i in range(self.m)]
 
@@ -508,38 +502,47 @@ class LQMarkov:
             each period at each Markov state
 
         """
-
-        # == Simplify notations == #
         beta, Π = self.beta, self.Π
         m, n, k = self.m, self.n, self.k
         As, Bs, Cs = self.As, self.Bs, self.Cs
         Qs, Rs, Ns = self.Qs, self.Rs, self.Ns
 
-        # == Solve for P(s) by iterating discrete riccati system== #
         Ps = solve_discrete_riccati_system(Π, As, Bs, Cs, Qs, Rs, Ns, beta,
                                            max_iter=max_iter)
 
-        # == calculate F and d == #
-        Fs = np.array([np.empty((k, n)) for i in range(m)])
+        Fs = np.empty((m, k, n))
         X = np.empty((m, m))
-        sum1, sum2 = np.empty((k, k)), np.empty((k, n))
+        sum1 = np.empty((k, k))
+        sum2 = np.empty((k, n))
+        # Pre-allocate for efficiency
         for i in range(m):
-            # CCi = C_i C_i'
             CCi = Cs[i] @ Cs[i].T
-            sum1[:, :] = 0.
-            sum2[:, :] = 0.
+            sum1.fill(0.0)
+            sum2.fill(0.0)
+            Pis = Ps
+            Πi = Π[i]  # vector of length m
+
+            # Vectorized slice for sum1 and sum2:
+            # [Bs[i].T @ Ps[j] @ Bs[i]] for all j
+            # [Bs[i].T @ Ps[j] @ As[i]] for all j
+            Bs_i = Bs[i]
+            Bs_iT = Bs[i].T
+            As_i = As[i]
+            Pis_Bs_i = Pis @ Bs_i   # (m, n, k)
+            Pis_As_i = Pis @ As_i   # (m, n, n)
             for j in range(m):
-                # for F
-                sum1 += beta * Π[i, j] * Bs[i].T @ Ps[j] @ Bs[i]
-                sum2 += beta * Π[i, j] * Bs[i].T @ Ps[j] @ As[i]
+                sum1 += beta * Πi[j] * Bs_iT @ Pis[j] @ Bs_i
+                sum2 += beta * Πi[j] * Bs_iT @ Pis[j] @ As_i
+                X[j, i] = np.trace(Pis[j] @ CCi)
 
-                # for d
-                X[j, i] = np.trace(Ps[j] @ CCi)
+            # Precompute LU factorization for Qs[i] + sum1, then solve
+            lu, piv = lu_factor(Qs[i] + sum1)
+            Fs[i][:, :] = lu_solve((lu, piv), sum2 + Ns[i])
 
-            Fs[i][:, :] = solve(Qs[i] + sum1, sum2 + Ns[i])
-
-        ds = solve(np.eye(m) - beta * Π,
-                   np.diag(beta * Π @ X).reshape((m, 1))).flatten()
+        # Solve for ds using pre-factorization if possible
+        A_ds = np.eye(m) - beta * Π
+        beta_Pi_X = beta * (Π @ X)
+        ds = solve(A_ds, np.diag(beta_Pi_X).reshape((m, 1))).flatten()
 
         self.Ps, self.ds, self.Fs = Ps, ds, Fs
 
