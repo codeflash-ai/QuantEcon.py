@@ -5,6 +5,8 @@
 import warnings
 from . import _rank_nullspace
 
+__warned_names = set()
+
 
 __all__ = ['rank_est', 'nullspace']
 
@@ -16,13 +18,18 @@ def __dir__():
 def __getattr__(name):
     if name not in __all__:
         raise AttributeError(
-                "`quantecon.rank_nullspace` is deprecated and has no attribute"
-                f" '{name}'."
-            )
+            "`quantecon.rank_nullspace` is deprecated and has no attribute"
+            f" '{name}'."
+        )
 
-    warnings.warn(f"Please use `{name}` from the `quantecon` namespace, the"
-                  "`quantecon.rank_nullspace` namespace is deprecated. You can"
-                  f" use following instead:\n `from quantecon import {name}`.",
-                  category=DeprecationWarning, stacklevel=2)
+    # Only warn once per attribute (per interpreter session)
+    if name not in __warned_names:
+        warnings.warn(
+            f"Please use `{name}` from the `quantecon` namespace, the"
+            "`quantecon.rank_nullspace` namespace is deprecated. You can"
+            f" use following instead:\n `from quantecon import {name}`.",
+            category=DeprecationWarning, stacklevel=2
+        )
+        __warned_names.add(name)
 
     return getattr(_rank_nullspace, name)
