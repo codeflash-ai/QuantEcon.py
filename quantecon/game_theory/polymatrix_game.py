@@ -40,6 +40,7 @@ from collections.abc import Sequence, Mapping, Iterable
 from numpy.typing import NDArray
 
 from .normal_form_game import NormalFormGame, Player, _nums_actions2string
+from numba import njit
 
 
 def hh_payoff_player(
@@ -132,6 +133,21 @@ def hh_payoff_player(
         for label, payoff in zip(payoff_labels, hh_payoffs_array)}
 
     return payoffs
+
+
+@njit(cache=True)
+def _matrix_min_max(matrix: np.ndarray) -> tuple[float, float]:
+    rows, cols = matrix.shape
+    min_v = matrix[0, 0]
+    max_v = matrix[0, 0]
+    for i in range(rows):
+        for j in range(cols):
+            val = matrix[i, j]
+            if val < min_v:
+                min_v = val
+            if val > max_v:
+                max_v = val
+    return min_v, max_v
 
 
 class PolymatrixGame:
@@ -314,6 +330,12 @@ class PolymatrixGame:
         tuple[float, float]
             Tuple of minimum and maximum.
         """
-        min_p = min([np.min(M) for M in self.polymatrix.values()])
-        max_p = max([np.max(M) for M in self.polymatrix.values()])
+        min_candidates = []
+        max_candidates = []
+        for matrix in self.polymatrix.values():
+            matrix_min, matrix_max = _matrix_min_max(matrix)
+            min_candidates.append(matrix.dtype.type(matrix_min))
+            max_candidates.append(matrix.dtype.type(matrix_max))
+        min_p = min(min_candidates)
+        max_p = max(max_candidates)
         return (min_p, max_p)
