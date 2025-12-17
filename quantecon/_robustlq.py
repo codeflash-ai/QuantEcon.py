@@ -8,6 +8,7 @@ from ._lqcontrol import LQ
 from ._quadsums import var_quadratic_sum
 from scipy.linalg import solve, inv, det
 from ._matrix_eqn import solve_discrete_lyapunov
+from numba import njit
 
 
 class RBLQ:
@@ -115,7 +116,7 @@ class RBLQ:
         return dP
 
     def b_operator(self, P):
-        r"""
+        """
         The B operator, mapping P into
 
         .. math::
@@ -142,13 +143,17 @@ class RBLQ:
 
         """
         A, B, Q, R, beta = self.A, self.B, self.Q, self.R, self.beta
-        S1 = Q + beta * (B.T @ P @ B)
-        S2 = beta * (B.T @ P @ A)
-        S3 = beta * (A.T @ P @ A)
-        F = solve(S1, S2) if not self.pure_forecasting else np.zeros(
-            (self.k, self.n))
-        new_P = R - (S2.T @ F) + S3
-
+        # Ensure all matrices are float64 for numba compatibility
+        A = A.astype(np.float64)
+        B = B.astype(np.float64)
+        Q = Q.astype(np.float64)
+        R = R.astype(np.float64)
+        P = P.astype(np.float64)
+        
+        if self.pure_forecasting:
+            F, new_P = _b_operator_pure_forecasting(Q, R, A, P, beta, self.k, self.n)
+        else:
+            F, new_P = _b_operator(Q, R, A, B, P, beta)
         return F, new_P
 
     def robust_rule(self, method='doubling'):
@@ -398,3 +403,24 @@ class RBLQ:
         o_F = (ho + beta * tr) / (1 - beta)
 
         return K_F, P_F, d_F, O_F, o_F
+
+@njit(cache=True, fastmath=True)
+def _b_operator(Q: np.ndarray, R: np.ndarray, A: np.ndarray, B: np.ndarray, P: np.ndarray, beta: float) -> tuple[np.ndarray, np.ndarray]:
+    # Q + beta * (B.T @ P @ B)
+    S1 = Q + beta * (B.T @ P @ B)
+    # beta * (B.T @ P @ A)
+    S2 = beta * (B.T @ P @ A)
+    # beta * (A.T @ P @ A)
+    S3 = beta * (A.T @ P @ A)
+    # Using np.linalg.solve since scipy.linalg.solve is not supported in nopython mode
+    F = np.linalg.solve(S1, S2)
+    new_P = R - (S2.T @ F) + S3
+    return F, new_P
+
+@njit(cache=True, fastmath=True)
+def _b_operator_pure_forecasting(Q: np.ndarray, R: np.ndarray, A: np.ndarray, P: np.ndarray, beta: float, k: int, n: int) -> tuple[np.ndarray, np.ndarray]:
+    # beta * (A.T @ P @ A)
+    S3 = beta * (A.T @ P @ A)
+    F = np.zeros((k, n))
+    new_P = R + S3
+    return F, new_P
