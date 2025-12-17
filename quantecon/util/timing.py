@@ -5,6 +5,7 @@ Provides Matlab-like tic, tac and toc functions.
 import time
 import numpy as np
 from ..timings.timings import get_default_precision
+from numba import njit
 
 
 class __Timer__:
@@ -100,10 +101,10 @@ class __Timer__:
         elapsed = t-self.start
 
         if verbose:
-            m, s = divmod(elapsed, 60)
-            h, m = divmod(m, 60)
+            h, m, s, subsec = _decompose_time(elapsed, digits)
             print("TOC: Elapsed: %d:%02d:%0d.%0*d" %
-                  (h, m, s, digits, (s % 1)*(10**digits)))
+                  (h, m, s, digits, subsec))
+
 
         return elapsed
 
@@ -454,6 +455,19 @@ def toc(verbose=True, digits=2):
 
 def loop_timer(n, function, args=None, verbose=True, digits=2, best_of=3):
     return __timer__.loop_timer(n, function, args, verbose, digits, best_of)
+
+@njit(cache=True, fastmath=True)
+def _decompose_time(elapsed: float, digits: int):
+    """
+    Helper to decompose elapsed time into hours, minutes, seconds, and fractional.
+    Numba-accelerated for performance.
+    """
+    m, s = divmod(elapsed, 60)
+    h, m = divmod(m, 60)
+    # int required for formatting
+    subsec = int((s % 1)*(10**digits))
+    # Cast to int for formatting the printf
+    return int(h), int(m), int(s), subsec
 
 
 # Set docstring
