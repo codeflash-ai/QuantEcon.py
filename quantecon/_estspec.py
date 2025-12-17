@@ -3,6 +3,7 @@ Functions for working with periodograms of scalar data.
 
 """
 import numpy as np
+from numba import njit
 from numpy.fft import fft
 
 
@@ -43,32 +44,30 @@ def smooth(x, window_len=7, window='hanning'):
         window_len += 1
         print("Window length reset to {}".format(window_len))
 
-    windows = {'hanning': np.hanning,
-               'hamming': np.hamming,
-               'bartlett': np.bartlett,
-               'blackman': np.blackman,
-               'flat': np.ones  # moving average
-               }
-
-    # === Reflect x around x[0] and x[-1] prior to convolution === #
-    k = int(window_len / 2)
-    xb = x[:k]   # First k elements
-    xt = x[-k:]  # Last k elements
-    s = np.concatenate((xb[::-1], x, xt[::-1]))
-
     # === Select window values === #
-    if window in windows.keys():
-        w = windows[window](window_len)
+    win_fn = None
+    if window == 'hanning':
+        win_fn = _hanning_window
+    elif window == 'hamming':
+        win_fn = _hamming_window
+    elif window == 'bartlett':
+        win_fn = _bartlett_window
+    elif window == 'blackman':
+        win_fn = _blackman_window
+    elif window == 'flat':
+        win_fn = _flat_window
     else:
         msg = "Unrecognized window type '{}'".format(window)
         print(msg + " Defaulting to hanning")
-        w = windows['hanning'](window_len)
+        win_fn = _hanning_window
 
-    return np.convolve(w / w.sum(), s, mode='valid')
+    s = _compute_reflected_signal(x, window_len)
+    w = win_fn(window_len)
+    return _convolve_valid(w, s)
 
 
 def periodogram(x, window=None, window_len=7):
-    r"""
+    """
     Computes the periodogram
 
     .. math::
@@ -150,3 +149,76 @@ def ar_periodogram(x, window='hanning', window_len=7):
     I_w = I_w / np.abs(1 - phi * np.exp(1j * w))**2
 
     return w, I_w
+
+
+@njit(cache=True)
+def _compute_reflected_signal(x: np.ndarray, window_len: int) -> np.ndarray:
+    # === Reflect x around x[0] and x[-1] prior to convolution === #
+    k = window_len // 2
+    xb = x[:k]   # First k elements
+    xt = x[-k:]  # Last k elements
+    s_len = len(x) + 2 * k
+    s = np.empty(s_len, dtype=x.dtype)
+    # Reflect xb
+    for i in range(k):
+        s[i] = xb[k - i - 1]
+    # Assign x
+    for i in range(len(x)):
+        s[k + i] = x[i]
+    # Reflect xt
+    for i in range(k):
+        s[k + len(x) + i] = xt[k - i - 1]
+    return s
+
+@njit(cache=True)
+def _convolve_valid(w: np.ndarray, s: np.ndarray) -> np.ndarray:
+    N = len(s)
+    M = len(w)
+    out_len = N - M + 1
+    result = np.empty(out_len, dtype=np.float64)
+    wsum = 0.0
+    for i in range(M):
+        wsum += w[i]
+    # Pre-divide window
+    win = np.empty_like(w, dtype=np.float64)
+    for i in range(M):
+        win[i] = w[i] / wsum
+    # Convolution, valid mode
+    for i in range(out_len):
+        acc = 0.0
+        for j in range(M):
+            acc += win[j] * s[i + j]
+        result[i] = acc
+    return result
+
+@njit(cache=True)
+def _hanning_window(window_len: int) -> np.ndarray:
+    return 0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(window_len) / (window_len - 1))
+
+@njit(cache=True)
+def _hamming_window(window_len: int) -> np.ndarray:
+    return 0.54 - 0.46 * np.cos(2.0 * np.pi * np.arange(window_len) / (window_len - 1))
+
+@njit(cache=True)
+def _bartlett_window(window_len: int) -> np.ndarray:
+    n = window_len
+    ret = np.empty(n, dtype=np.float64)
+    mid = (n - 1) / 2.0
+    for i in range(n):
+        ret[i] = 1.0 - abs((i - mid) / mid)
+    return ret
+
+@njit(cache=True)
+def _blackman_window(window_len: int) -> np.ndarray:
+    n = window_len
+    x = np.arange(n)
+    return (0.42
+            - 0.5 * np.cos(2.0 * np.pi * x / (n - 1))
+            + 0.08 * np.cos(4.0 * np.pi * x / (n - 1)))
+
+@njit(cache=True)
+def _flat_window(window_len: int) -> np.ndarray:
+    arr = np.empty(window_len, dtype=np.float64)
+    for i in range(window_len):
+        arr[i] = 1.0
+    return arr
