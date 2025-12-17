@@ -5,6 +5,8 @@
 import warnings
 from . import _rank_nullspace
 
+_warning_issued = set()
+
 
 __all__ = ['rank_est', 'nullspace']
 
@@ -20,9 +22,11 @@ def __getattr__(name):
                 f" '{name}'."
             )
 
-    warnings.warn(f"Please use `{name}` from the `quantecon` namespace, the"
-                  "`quantecon.rank_nullspace` namespace is deprecated. You can"
-                  f" use following instead:\n `from quantecon import {name}`.",
-                  category=DeprecationWarning, stacklevel=2)
+    if name not in _warning_issued:
+        warnings.warn(f"Please use `{name}` from the `quantecon` namespace, the"
+                      "`quantecon.rank_nullspace` namespace is deprecated. You can"
+                      f" use following instead:\n `from quantecon import {name}`.",
+                      category=DeprecationWarning, stacklevel=2)
+        _warning_issued.add(name)
 
     return getattr(_rank_nullspace, name)
