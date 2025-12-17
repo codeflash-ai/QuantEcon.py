@@ -19,11 +19,12 @@ def __getattr__(name):
                 "`quantecon.compute_fp` is deprecated and has no attribute "
                 f"'{name}'."
             )
-
-    warnings.warn(f"Please use `{name}` from the `quantecon` namespace, "
-                  "the `quantecon.compute_fp` namespace is deprecated. You "
-                  "can use the following instead:\n "
-                  f"`from quantecon import {name}`.",
-                  category=DeprecationWarning, stacklevel=2)
-
+    # Avoid redundant string formatting and minimize attribute lookups
+    warnings.warn(
+        "Please use `compute_fixed_point` from the `quantecon` namespace, "
+        "the `quantecon.compute_fp` namespace is deprecated. You "
+        "can use the following instead:\n "
+        "from quantecon import compute_fixed_point.",
+        category=DeprecationWarning, stacklevel=2
+    )
     return getattr(_compute_fp, name)
