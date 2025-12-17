@@ -68,20 +68,34 @@ class IVP(integrate.ode):
     def _integrate_variable_trajectory(self, h, g, tol, step, relax):
         """Generates a solution trajectory of variable length."""
         # initialize the solution using initial condition
-        solution = np.hstack((self.t, self.y))
+        initial_capacity = 1024
+        dim = self.y.shape[0] if hasattr(self.y, "shape") else len(self.y)
+        solution = np.empty((initial_capacity, dim + 1), dtype=self.y.dtype)
+        row = 0
+        solution[row, 0] = self.t
+        solution[row, 1:] = self.y
+        row += 1
 
         while self.successful():
 
             self.integrate(self.t + h, step, relax)
-            current_step = np.hstack((self.t, self.y))
-            solution = np.vstack((solution, current_step))
+
+            if row >= solution.shape[0]:
+                new_capacity = solution.shape[0] * 2
+                new_solution = np.empty((new_capacity, dim + 1), dtype=self.y.dtype)
+                new_solution[:solution.shape[0]] = solution
+                solution = new_solution
+
+            solution[row, 0] = self.t
+            solution[row, 1:] = self.y
+            row += 1
 
             if g(self.t, self.y, *self.f_params) < tol:
                 break
             else:
                 continue
 
-        return solution
+        return solution[:row]
 
     def _initialize_integrator(self, t0, y0, integrator, **kwargs):
         """Initializes the integrator prior to integration."""
