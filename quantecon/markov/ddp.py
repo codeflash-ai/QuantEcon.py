@@ -119,6 +119,7 @@ from .utilities import (
     _fill_dense_Q, _s_wise_max_argmax, _s_wise_max, _find_indices,
     _has_sorted_sa_indices, _generate_a_indptr
 )
+from numba import njit
 
 
 class DiscreteDP:
@@ -370,7 +371,8 @@ class DiscreteDP:
             def s_wise_max(vals, out=None, out_argmax=None):
                 """
                 Return the vector max_a vals(s, a), where vals is represented
-                by a 1-dimensional ndarray of shape (self.num_sa_pairs,).
+                by a 2-dimensional ndarray of shape (n, m). Stored in out,
+                which must be of length self.num_states.
                 out and out_argmax must be of length self.num_states; dtype of
                 out_argmax must be int.
 
@@ -525,7 +527,7 @@ class DiscreteDP:
             ns = self.num_states
             na = self.a_indices.max() + 1
             R = np.full((ns, na), -np.inf)
-            R[self.s_indices, self.a_indices] = self.R
+            _assign_sa_rewards(self.s_indices, self.a_indices, self.R, R)
             Q = np.zeros((ns, na, ns))
             if self._sparse:
                 _fill_dense_Q(self.s_indices, self.a_indices,
@@ -1078,3 +1080,9 @@ def backward_induction(ddp, T, v_term=None):
         ddp.bellman_operator(vs[t, :], Tv=vs[t-1, :], sigma=sigmas[t-1, :])
 
     return vs, sigmas
+
+
+@njit(cache=True)
+def _assign_sa_rewards(s_indices, a_indices, R_flat, Rmat):
+    for i in range(R_flat.shape[0]):
+        Rmat[s_indices[i], a_indices[i]] = R_flat[i]
