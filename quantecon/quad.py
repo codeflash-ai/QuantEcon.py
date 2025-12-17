@@ -13,7 +13,7 @@ and Finance, MIT Press, 2002.
 import math
 import numpy as np
 import scipy.linalg as la
-from numba import jit, vectorize
+from numba import njit, jit, vectorize
 from ._ce_util import ckron, gridmake
 from .util import check_random_state
 
@@ -168,46 +168,48 @@ def qnwequi(n, a, b, kind="N", equidist_pp=None, random_state=None):
     random_state = check_random_state(random_state)
 
     if equidist_pp is None:
-        import sympy as sym
-        equidist_pp = np.sqrt(np.array(list(sym.primerange(0, 7920))))
+        # Use global variable to cache computed equidist_pp for reuse
+        # (simple module-level lazy cache; thread-safety not required here)
+        global _EQUIPRIMES_SQRT
+        try:
+            equidist_pp = _EQUIPRIMES_SQRT
+        except NameError:
+            import sympy as sym
+            _EQUIPRIMES_SQRT = np.sqrt(np.array(list(sym.primerange(0, 7920))))
+            equidist_pp = _EQUIPRIMES_SQRT
+
+    # Convert n, a, b to arrays and ensure 1d
 
     n, a, b = list(map(np.atleast_1d, list(map(np.asarray, [n, a, b]))))
 
     d = max(list(map(len, [n, a, b])))
-    n = np.prod(n)
+    nprod = int(np.prod(n))
 
-    if a.size == 1:
-        a = np.repeat(a, d)
+    a = _njit_broadcast_repeat(a, d)
+    b = _njit_broadcast_repeat(b, d)
+    r = b - a
 
-    if b.size == 1:
-        b = np.repeat(b, d)
+    i = _njit_arange_int64(1, nprod + 1)
 
-    # Specify `dtype=np.int64` to avoid overflow on Windows
-    i = np.arange(1, n + 1, dtype=np.int64)
-
-    if kind.upper() == "N":  # Neiderreiter
-        j = 2.0 ** (np.arange(1, d+1) / (d+1))
-        nodes = np.outer(i, j)
-        nodes = (nodes - fix(nodes)).squeeze()
-    elif kind.upper() == "W":  # Weyl
+    kindu = kind.upper()
+    if kindu == "N":  # Neiderreiter
+        j = np.power(2.0, np.arange(1, d+1) / (d+1))
+        # njit'd outer/subtract for fix
+        nodes = _outer_and_subtract_fix(i, j)
+    elif kindu == "W":  # Weyl
         j = equidist_pp[:d]
-        nodes = np.outer(i, j)
-        nodes = (nodes - fix(nodes)).squeeze()
-    elif kind.upper() == "H":  # Haber
+        nodes = _outer_and_subtract_fix(i, j)
+    elif kindu == "H":  # Haber
         j = equidist_pp[:d]
-        nodes = np.outer(i * (i+1) / 2, j)
-        nodes = (nodes - fix(nodes)).squeeze()
-    elif kind.upper() == "R":  # pseudo-random
-        nodes = random_state.random((n, d)).squeeze()
+        nodes = _outer_and_subtract_fix_haber(i, j)
+    elif kindu == "R":  # pseudo-random
+        nodes = random_state.random((nprod, d)).astype(np.float64)
     else:
         raise ValueError("Unknown sequence requested")
-
-    # compute nodes and weights
-    r = b - a
     nodes = a + nodes * r
-    weights = (np.prod(r) / n) * np.ones(n)
+    weights = (_njit_prod(r) / nprod) * np.ones(nprod)
 
-    return nodes, weights
+    return nodes.squeeze(), weights
 
 
 def qnwlege(n, a, b):
@@ -1228,3 +1230,53 @@ def _qnwgamma1(n, a=1.0, b=1.0, tol=3e-14):
         weights[i] = factor / (pp*n*p2)
 
     return nodes*b, weights
+
+
+# Numba helper for np.prod (variable size) and basic array operations
+@njit(cache=True, fastmath=True)
+def _njit_prod(arr: np.ndarray) -> float:
+    result = 1.0
+    for i in range(arr.size):
+        result *= arr[i]
+    return result
+
+@njit(cache=True, fastmath=True)
+def _njit_broadcast_repeat(arr: np.ndarray, count: int) -> np.ndarray:
+    """If arr.size == 1, repeat arr to shape (count,), else return arr"""
+    if arr.size == 1:
+        out = np.empty(count, dtype=arr.dtype)
+        val = arr[0]
+        for i in range(count):
+            out[i] = val
+        return out
+    return arr
+
+@njit(cache=True, fastmath=True)
+def _njit_arange_int64(start: int, stop: int) -> np.ndarray:
+    n = stop - start
+    result = np.empty(n, dtype=np.int64)
+    for idx in range(n):
+        result[idx] = start + idx
+    return result
+
+@njit(cache=True, fastmath=True)
+def _outer_and_subtract_fix(i: np.ndarray, j: np.ndarray) -> np.ndarray:
+    n, d = i.size, j.size
+    nodes = np.empty((n, d), dtype=np.float64)
+    for ni in range(n):
+        for di in range(d):
+            val = i[ni] * j[di]
+            nodes[ni, di] = val - fix(val)
+    return nodes
+
+@njit(cache=True, fastmath=True)
+def _outer_and_subtract_fix_haber(i: np.ndarray, j: np.ndarray) -> np.ndarray:
+    n, d = i.size, j.size
+    nodes = np.empty((n, d), dtype=np.float64)
+    for ni in range(n):
+        i_val = i[ni]
+        term = i_val * (i_val + 1) / 2.0
+        for di in range(d):
+            val = term * j[di]
+            nodes[ni, di] = val - fix(val)
+    return nodes
