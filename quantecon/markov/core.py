@@ -83,7 +83,7 @@ import numbers
 from math import gcd
 import numpy as np
 from scipy import sparse
-from numba import jit
+from numba import njit, jit
 
 from .gth_solve import gth_solve
 from .._graph_tools import DiGraph
@@ -319,12 +319,19 @@ class MarkovChain:
             except IndexError:
                 raise ValueError(error_msg)
         else:
-            idx = 0
-            while idx < self.n:
-                if np.array_equal(self.state_values[idx], value):
-                    return idx
-                idx += 1
-            raise ValueError(error_msg)
+            try:
+                value_array = np.asarray(value)
+                idx = _ndarray_value_index(self.state_values, self.n, value_array)
+                if idx == -1:
+                    raise ValueError(error_msg)
+                return idx
+            except (TypeError, ValueError):
+                idx = 0
+                while idx < self.n:
+                    if np.array_equal(self.state_values[idx], value):
+                        return idx
+                    idx += 1
+                raise ValueError(error_msg)
 
     @property
     def digraph(self):
@@ -724,3 +731,22 @@ def mc_sample_path(P, init=0, sample_size=1000, random_state=None):
     mc = MarkovChain(P)
     return mc.simulate(ts_length=sample_size, init=X_0,
                        random_state=random_state)
+
+
+@njit(cache=True)
+def _ndarray_value_index(state_values: np.ndarray, n: int, value: np.ndarray) -> int:
+    for idx in range(n):
+        is_equal = True
+        sv = state_values[idx]
+        if sv.shape != value.shape:
+            is_equal = False
+        else:
+            it_sv = sv.flat
+            it_v = value.flat
+            for a, b in zip(it_sv, it_v):
+                if a != b:
+                    is_equal = False
+                    break
+        if is_equal:
+            return idx
+    return -1
