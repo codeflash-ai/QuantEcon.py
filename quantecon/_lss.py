@@ -7,7 +7,7 @@ from textwrap import dedent
 import numpy as np
 from scipy.linalg import solve
 from ._matrix_eqn import solve_discrete_lyapunov
-from numba import jit
+from numba import njit, jit
 from .util import check_random_state
 
 
@@ -368,7 +368,7 @@ class LinearStateSpace:
         return S_x, S_y
 
     def impulse_response(self, j=5):
-        r"""
+        """
         Pulls off the imuplse response coefficients to a shock
         in :math:`w_{t}` for :math:`x` and :math:`y`
 
@@ -390,19 +390,19 @@ class LinearStateSpace:
         ycoef : list(array_like(float, 2))
             The coefficients for y
         """
+        # Validate j parameter to maintain original error behavior
+        # This mimics the behavior of range(j) in the original code
+        try:
+            # This will raise TypeError for non-integer types like float, str, None
+            range(j)
+        except TypeError:
+            raise
+        
         # Pull out matrices
         A, C, G, H = self.A, self.C, self.G, self.H
-        Apower = np.copy(A)
 
-        # Create room for coefficients
-        xcoef = [C]
-        ycoef = [G @ C]
-
-        for i in range(j):
-            xcoef.append(Apower @ C)
-            ycoef.append(G @ (Apower @ C))
-            Apower = Apower @ A
-
+        # Use numba-accelerated helper for main computation
+        xcoef, ycoef = self._impulse_response_numba(A, C, G, j)
         return xcoef, ycoef
 
     def __partition(self):
@@ -463,3 +463,26 @@ class LinearStateSpace:
         self.P, self.A21, self.A22, self.C2 = P, A21, A22, C2
 
         return A21, A22
+
+    @staticmethod
+    @njit(cache=True)
+    def _impulse_response_numba(A: np.ndarray, C: np.ndarray, G: np.ndarray, j: int):
+        # Requires 2D ndarrays for A, C, G
+        n, m = C.shape
+        k, n1 = G.shape
+        Apower = A.copy()
+
+        # Store the coefficients in lists of objects (arrays)
+        # Pure numba lists would not allow us to mix shapes, so we use object arrays
+        xcoef = [C.copy()]
+        ycoef = [G @ C]
+
+        # Use explicit loops, as JIT improves the dot/matmul speed
+        for _ in range(j):
+            xp = Apower @ C
+            xcoef.append(xp.copy())
+            yp = G @ xp
+            ycoef.append(yp)
+            Apower = Apower @ A
+
+        return xcoef, ycoef
