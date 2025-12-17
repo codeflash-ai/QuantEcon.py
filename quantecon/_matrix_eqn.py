@@ -13,6 +13,7 @@ import numpy as np
 from numpy.linalg import solve
 from scipy.linalg import solve_discrete_lyapunov as sp_solve_discrete_lyapunov
 from scipy.linalg import solve_discrete_are as sp_solve_discrete_are
+from numba import njit
 
 
 EPS = np.finfo(float).eps
@@ -162,65 +163,33 @@ def solve_discrete_riccati(A, B, Q, R, N=None, tolerance=1e-10, max_iter=500,
     if method == 'qz':
         X = sp_solve_discrete_are(A, B, Q, R, e=I, s=N.T)
         return X
-
-    # if method == 'doubling'
-
-    # == Set up == #
-    error = tolerance + 1
-    fail_msg = "Convergence failed after {} iterations."
-
-    # == Choose optimal value of gamma in R_hat = R + gamma B'B == #
-    current_min = np.inf
+    
+    # Ensure all arrays are float type for numba compatibility
+    A = A.astype(np.float64)
+    B = B.astype(np.float64)
+    Q = Q.astype(np.float64)
+    R = R.astype(np.float64)
+    N = N.astype(np.float64)
+    I = I.astype(np.float64)
+    
     candidates = (0.01, 0.1, 0.25, 0.5, 1.0, 2.0, 10.0, 100.0, 10e5)
     BB = B.T @ B
     BTA = B.T @ A
-    for gamma in candidates:
-        Z = R + gamma * BB
-        cn = np.linalg.cond(Z)
-        if cn * EPS < 1:
-            Q_tilde = - Q + (N.T @ solve(Z, N + gamma * BTA)) + gamma * I
-            G0 = B @ solve(Z, B.T)
-            A0 = (I - gamma * G0) @ A - (B @ solve(Z, N))
-            H0 = gamma * (A.T @ A0) - Q_tilde
-            f1 = np.linalg.cond(Z, np.inf)
-            f2 = gamma * f1
-            f3 = np.linalg.cond(I + (G0 @ H0))
-            f_gamma = max(f1, f2, f3)
-            if f_gamma < current_min:
-                best_gamma = gamma
-                current_min = f_gamma
-
-    # == If no candidate successful then fail == #
-    if current_min == np.inf:
+    best_gamma, R_hat, Q_tilde, G0, A0, H0 = _select_gamma_and_initialize(
+        B, A, Q, R, N, I, BB, BTA, candidates
+    )
+    if best_gamma < 0.0:
         msg = "Unable to initialize routine due to ill conditioned arguments"
         raise ValueError(msg)
 
     gamma = best_gamma
-    R_hat = R + gamma * BB
-
-    # == Initial conditions == #
-    Q_tilde = - Q + (N.T @ solve(R_hat, N + gamma * BTA)) + gamma * I
-    G0 = B @ solve(R_hat, B.T)
-    A0 = (I - gamma * G0) @ A - (B @ solve(R_hat, N))
-    H0 = gamma * (A.T @ A0) - Q_tilde
-    i = 1
 
     # == Main loop == #
-    while error > tolerance:
-
-        if i > max_iter:
-            raise ValueError(fail_msg.format(i))
-
-        else:
-            A1 = A0 @ solve(I + (G0 @ H0), A0)
-            G1 = G0 + ((A0 @ G0) @ solve(I + (H0 @ G0), A0.T))
-            H1 = H0 + (A0.T @ solve(I + (H0 @ G0), (H0 @ A0)))
-
-            error = np.max(np.abs(H1 - H0))
-            A0 = A1
-            G0 = G1
-            H0 = H1
-            i += 1
+    H1, converged, iterations = _doubling_iteration(I, A0, G0, H0, tolerance, max_iter)
+    
+    if not converged:
+        fail_msg = "Convergence failed after {} iterations."
+        raise ValueError(fail_msg.format(iterations))
 
     return H1 + gamma * I  # Return X
 
@@ -311,3 +280,90 @@ def solve_discrete_riccati_system(Π, As, Bs, Cs, Qs, Rs, Ns, beta,
             iteration += 1
 
     return Ps
+
+@njit(cache=True)
+def _select_gamma_and_initialize(
+    B: np.ndarray, A: np.ndarray, Q: np.ndarray, R: np.ndarray, N: np.ndarray,
+    I: np.ndarray, BB: np.ndarray, BTA: np.ndarray, candidates: tuple
+):
+    """
+    Numba helper to select gamma and initialize matrices.
+    Returns (gamma, R_hat, Q_tilde, G0, A0, H0)
+    """
+    current_min = np.inf
+    best_gamma = -1.0
+    n, k = R.shape[0], Q.shape[0]
+    
+    # Ensure B.T is float type for numba compatibility
+    BT = B.T.astype(np.float64)
+    
+    for idx in range(len(candidates)):
+        gamma = candidates[idx]
+        Z = R + gamma * BB
+        cn = np.linalg.cond(Z)
+        if cn * EPS < 1:
+            Z_invN = solve(Z, N + gamma * BTA)
+            Q_tilde = -Q + (N.T @ Z_invN) + gamma * I
+
+            Z_invBT = solve(Z, BT)
+            G0 = B @ Z_invBT
+            Z_invN_only = solve(Z, N)
+            A0 = (I - gamma * G0) @ A - (B @ Z_invN_only)
+            H0 = gamma * (A.T @ A0) - Q_tilde
+            f1 = np.linalg.cond(Z, np.inf)
+            f2 = gamma * f1
+            G0H0 = G0 @ H0
+            f3 = np.linalg.cond(I + G0H0)
+            f_gamma = max(f1, f2, f3)
+            if f_gamma < current_min:
+                best_gamma = gamma
+                R_hat = Z
+                best_Q_tilde = Q_tilde
+                best_G0 = G0
+                best_A0 = A0
+                best_H0 = H0
+                current_min = f_gamma
+    # Return values
+    if current_min == np.inf:
+        # Fail signal: gamma is negative
+        return -1.0, None, None, None, None, None
+    else:
+        return best_gamma, R_hat, best_Q_tilde, best_G0, best_A0, best_H0
+
+@njit(cache=True)
+def _doubling_iteration(
+    I: np.ndarray,
+    A0: np.ndarray,
+    G0: np.ndarray,
+    H0: np.ndarray,
+    tolerance: float,
+    max_iter: int
+):
+    """
+    Numba main loop for doubling algorithm.
+    Returns H1 after convergence (A0, G0, H0 updated).
+    Returns (H1, converged, iterations)
+    """
+    error = tolerance + 1
+    i = 1
+    while error > tolerance:
+        if i > max_iter:
+            # Return flag indicating convergence failure
+            return H0, False, i
+        # == Main iteration body == #
+        IG0H0 = I + (G0 @ H0)
+        IG0H0_invA0 = solve(IG0H0, A0)
+        A1 = A0 @ IG0H0_invA0
+        IH0G0 = I + (H0 @ G0)
+        IH0G0_invA0T = solve(IH0G0, A0.T)
+        G1 = G0 + ((A0 @ G0) @ IH0G0_invA0T)
+        H0G0 = H0 @ G0
+        IH0G0_invH0A0 = solve(IH0G0, H0 @ A0)
+        H1 = H0 + (A0.T @ IH0G0_invH0A0)
+
+        error = np.max(np.abs(H1 - H0))
+        A0 = A1
+        G0 = G1
+        H0 = H1
+        i += 1
+    return H1, True, i
