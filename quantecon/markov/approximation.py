@@ -168,7 +168,7 @@ def rouwenhorst(n, rho, sigma, mu=0.):
 
 
 def tauchen(n, rho, sigma, mu=0., n_std=3):
-    r"""
+    """
     Computes a Markov chain associated with a discretized version of
     the linear Gaussian AR(1) process
 
@@ -235,7 +235,9 @@ def tauchen(n, rho, sigma, mu=0., n_std=3):
 
     # approximate Markov transition matrix for
     # demeaned y_t
-    _fill_tauchen(x, P, n, rho, sigma, half_step)
+    _fill_tauchen_jit(x, P, n, rho, sigma, half_step)
+
+    # shifts the state values by the long run mean of y_t
 
     # shifts the state values by the long run mean of y_t
     mu = mu / (1 - rho)
@@ -468,3 +470,19 @@ def discrete_var(A,
     mc = fit_discrete_mc(X.T, V, order=order)
 
     return mc
+
+@njit(fastmath=True, cache=True)
+def _fill_tauchen_jit(x: np.ndarray, P: np.ndarray, n: int, rho: float, sigma: float, half_step: float) -> None:
+    """
+    JIT-compiled implementation of Tauchen's fill using numba. A direct
+    replacement for _fill_tauchen, using the njit std_norm_cdf from
+    quantecon.markov.approximation. This keeps signature and behavior unchanged.
+    """
+    for i in range(n):
+        P[i, 0] = std_norm_cdf((x[0] - rho * x[i] + half_step) / sigma)
+        P[i, n - 1] = 1 - \
+            std_norm_cdf((x[n - 1] - rho * x[i] - half_step) / sigma)
+        for j in range(1, n - 1):
+            z = x[j] - rho * x[i]
+            P[i, j] = (std_norm_cdf((z + half_step) / sigma) -
+                       std_norm_cdf((z - half_step) / sigma))
