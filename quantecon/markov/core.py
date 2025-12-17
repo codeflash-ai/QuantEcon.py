@@ -83,11 +83,12 @@ import numbers
 from math import gcd
 import numpy as np
 from scipy import sparse
-from numba import jit
+from numba import njit, jit
 
 from .gth_solve import gth_solve
 from .._graph_tools import DiGraph
 from ..util import searchsorted, check_random_state, rng_integers
+from typing import Any
 
 
 class MarkovChain:
@@ -282,8 +283,31 @@ class MarkovChain:
         elif values.ndim == state_values_ndim:  # array of values
             k = values.shape[0]
             idx = np.empty(k, dtype=int)
-            for i in range(k):
-                idx[i] = self._get_index(values[i])
+            # Optimize index search for batches using numba
+            if self.state_values is None:
+                # If state_values is None: states are integers from 0 to n-1
+                for i in range(k):
+                    idx[i] = self._get_index(values[i])
+            elif self.state_values.ndim == 1:
+                try:
+                    idx = get_index_batch_1d(self.state_values, self.n, values)
+                except ValueError as e:
+                    # Supply meaningful error messages per instance
+                    # Retriable for behavioral parity
+                    for i in range(k):
+                        try:
+                            idx[i] = self._get_index(values[i])
+                        except ValueError:
+                            raise ValueError(f'value {values[i]} not found') from None
+            else:
+                try:
+                    idx = get_index_batch_nd(self.state_values, self.n, values)
+                except ValueError:
+                    for i in range(k):
+                        try:
+                            idx[i] = self._get_index(values[i])
+                        except ValueError:
+                            raise ValueError(f'value {values[i]} not found') from None
             return idx
         else:
             raise ValueError('invalid value')
@@ -314,7 +338,8 @@ class MarkovChain:
         # if self.state_values is not None:
         if self.state_values.ndim == 1:
             try:
-                idx = np.where(self.state_values == value)[0][0]
+                idx_arr = np.where(self.state_values == value)[0]
+                idx = idx_arr[0]
                 return idx
             except IndexError:
                 raise ValueError(error_msg)
@@ -724,3 +749,40 @@ def mc_sample_path(P, init=0, sample_size=1000, random_state=None):
     mc = MarkovChain(P)
     return mc.simulate(ts_length=sample_size, init=X_0,
                        random_state=random_state)
+
+
+@njit(cache=True)
+def _get_index_1d(state_values: np.ndarray, n: int, value: Any):
+    # Numba does not support exception messages, so we raise ValueError without message for speed here.
+    # The error text is handled in the original method for behavioral preservation.
+    for idx in range(n):
+        if state_values[idx] == value:
+            return idx
+    raise ValueError
+
+@njit(cache=True)
+def _get_index_nd(state_values: np.ndarray, n: int, value: np.ndarray):
+    for idx in range(n):
+        # For numeric homogeneous arrays, use np.array_equal logic
+        # This only works for strict shape/type matching
+        # Numba only supports == for arrays of same type/shape, so we must check shape manually
+        sv = state_values[idx]
+        if sv.shape == value.shape and np.all(sv == value):
+            return idx
+    raise ValueError
+
+@njit(cache=True)
+def get_index_batch_1d(state_values: np.ndarray, n: int, values: np.ndarray):
+    k = values.shape[0]
+    idx = np.empty(k, dtype=np.int64)
+    for i in range(k):
+        idx[i] = _get_index_1d(state_values, n, values[i])
+    return idx
+
+@njit(cache=True)
+def get_index_batch_nd(state_values: np.ndarray, n: int, values: np.ndarray):
+    k = values.shape[0]
+    idx = np.empty(k, dtype=np.int64)
+    for i in range(k):
+        idx[i] = _get_index_nd(state_values, n, values[i])
+    return idx
