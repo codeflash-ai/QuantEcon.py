@@ -6,6 +6,7 @@ Tests for ivp.py
 import numpy as np
 
 from quantecon import IVP
+from numba import njit
 
 # use the Solow Model with Cobb-Douglas production as test case
 def solow_model(t, k, g, n, s, alpha, delta):
@@ -128,17 +129,28 @@ def solow_analytic_solution(t, k0, g, n, s, alpha, delta):
         Trajectory describing the analytic solution of the model.
 
     """
-    # lambda governs the speed of convergence
-    lmbda = (n + g + delta) * (1 - alpha)
-
-    # analytic solution for Solow model at time t
-    k_t = (((s / (n + g + delta)) * (1 - np.exp(-lmbda * t)) +
-            k0**(1 - alpha) * np.exp(-lmbda * t))**(1 / (1 - alpha)))
-
-    # combine into a (t.size, 2) array
-    analytic_traj = np.hstack((t[:, np.newaxis], k_t[:, np.newaxis]))
-
-    return analytic_traj
+    # Check if we can use the optimized version
+    try:
+        # Verify t is a numpy array
+        if not isinstance(t, np.ndarray):
+            # Fall back to original for non-array inputs
+            return _solow_analytic_solution_original(t, k0, g, n, s, alpha, delta)
+        
+        # Check for problematic inputs that would cause different behavior
+        # - Negative k0 causes complex results in original but NaN in numba
+        # - Non-numeric types cause different error types
+        if not isinstance(k0, (int, float, np.number)) or k0 < 0:
+            return _solow_analytic_solution_original(t, k0, g, n, s, alpha, delta)
+        
+        if not all(isinstance(param, (int, float, np.number)) for param in [g, n, s, alpha, delta]):
+            return _solow_analytic_solution_original(t, k0, g, n, s, alpha, delta)
+        
+        # Use optimized version for valid inputs
+        return _solow_analytic_solution_numba(t, k0, g, n, s, alpha, delta)
+    
+    except:
+        # Fall back to original implementation on any error
+        return _solow_analytic_solution_original(t, k0, g, n, s, alpha, delta)
 
 # create an instance of the IVP class
 valid_params = (0.02, 0.02, 0.15, 0.33, 0.05)
@@ -281,3 +293,35 @@ def test_compute_residual():
         expected_residual = np.zeros((N, 2))
         actual_residual = tmp_residual
         np.testing.assert_almost_equal(expected_residual, actual_residual)
+
+
+@njit(cache=True, fastmath=True)
+def _solow_analytic_solution_numba(t: np.ndarray, k0: float, g: float, n: float, s: float, alpha: float, delta: float) -> np.ndarray:
+    # lambda governs the speed of convergence
+    lmbda = (n + g + delta) * (1 - alpha)
+    k_t = np.empty(t.size, dtype=np.float64)
+
+    for i in range(t.size):
+        exp_term = np.exp(-lmbda * t[i])
+        part = (s / (n + g + delta)) * (1 - exp_term)
+        k_t[i] = (part + k0**(1 - alpha) * exp_term)**(1 / (1 - alpha))
+
+    analytic_traj = np.empty((t.size, 2), dtype=np.float64)
+    analytic_traj[:, 0] = t
+    analytic_traj[:, 1] = k_t
+    return analytic_traj
+
+
+def _solow_analytic_solution_original(t, k0, g, n, s, alpha, delta):
+    """Original implementation for fallback when optimization can't be used."""
+    # lambda governs the speed of convergence
+    lmbda = (n + g + delta) * (1 - alpha)
+
+    # analytic solution for Solow model at time t
+    k_t = (((s / (n + g + delta)) * (1 - np.exp(-lmbda * t)) +
+            k0**(1 - alpha) * np.exp(-lmbda * t))**(1 / (1 - alpha)))
+
+    # combine into a (t.size, 2) array
+    analytic_traj = np.hstack((t[:, np.newaxis], k_t[:, np.newaxis]))
+
+    return analytic_traj
