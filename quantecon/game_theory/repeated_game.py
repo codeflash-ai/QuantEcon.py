@@ -157,11 +157,22 @@ def _equilibrium_payoffs_abreu_sannikov(rpg, tol=1e-12, max_iter=500,
         n_old_pt = n_new_pt
         hull = ConvexHull(W_old[:n_old_pt])
 
-        W_new, n_new_pt = \
-            _R(delta, sg.nums_actions, sg.payoff_arrays,
-               best_dev_gains, hull.points, hull.vertices,
-               hull.equations, u, IC, action_profile_payoff,
-               extended_payoff, new_pts, W_new)
+        W_new, n_new_pt = _R_numba(
+            delta,
+            sg.nums_actions,
+            sg.payoff_arrays,
+            best_dev_gains,
+            hull.points,
+            hull.vertices,
+            hull.equations,
+            u,
+            IC,
+            action_profile_payoff,
+            extended_payoff,
+            new_pts,
+            W_new
+        )
+
 
         n_iter += 1
         if n_iter >= max_iter:
@@ -173,7 +184,8 @@ def _equilibrium_payoffs_abreu_sannikov(rpg, tol=1e-12, max_iter=500,
                 break
 
         # update threat points
-        _update_u(u, W_new[:n_new_pt])
+        _update_u_numba(u, W_new[:n_new_pt])
+
 
     hull = ConvexHull(W_new[:n_new_pt])
 
@@ -200,11 +212,11 @@ def _best_dev_gains(rpg):
     """
     sg, delta = rpg.sg, rpg.delta
 
-    best_dev_gains = ((1-delta)/delta *
-                      (np.max(sg.payoff_arrays[i], 0) - sg.payoff_arrays[i])
-                      for i in range(2))
-
-    return tuple(best_dev_gains)
+    # Material change: Numba does not support np.max with axis for tuples;
+    # move to a helper function for JIT
+    dev_gains_0 = _compute_best_dev_gain_numba(sg.payoff_arrays[0], delta)
+    dev_gains_1 = _compute_best_dev_gain_numba(sg.payoff_arrays[1], delta)
+    return (dev_gains_0, dev_gains_1)
 
 
 @njit
@@ -457,6 +469,100 @@ def _update_u(u, W):
     """
     for i in range(2):
         W_min = W[:, i].min()
+        if u[i] < W_min:
+            u[i] = W_min
+
+    return u
+
+@njit(cache=True)
+def _compute_best_dev_gain_numba(payoff_array: np.ndarray, delta: float) -> np.ndarray:
+    # payoff_array is shape (n, m)
+    out = np.empty_like(payoff_array)
+    n, m = payoff_array.shape
+    for i in range(n):
+        max_val = payoff_array[i].max()
+        for j in range(m):
+            out[i, j] = ((1-delta)/delta) * (max_val - payoff_array[i, j])
+    return out
+
+@njit(cache=True)
+def _R_numba(
+    delta: float,
+    nums_actions,
+    payoff_arrays,
+    best_dev_gains,
+    points,
+    vertices,
+    equations,
+    u,
+    IC,
+    action_profile_payoff,
+    extended_payoff,
+    new_pts,
+    W_new,
+    tol: float = 1e-10
+):
+    n_new_pt = 0
+    for a0 in range(nums_actions[0]):
+        for a1 in range(nums_actions[1]):
+            action_profile_payoff[0] = payoff_arrays[0][a0, a1]
+            action_profile_payoff[1] = payoff_arrays[1][a1, a0]
+            IC[0] = u[0] + best_dev_gains[0][a0, a1]
+            IC[1] = u[1] + best_dev_gains[1][a1, a0]
+
+            # check if payoff is larger than IC
+            if action_profile_payoff[0] >= IC[0] and action_profile_payoff[1] >= IC[1]:
+                # check if payoff is inside the convex hull
+                extended_payoff[0] = action_profile_payoff[0]
+                extended_payoff[1] = action_profile_payoff[1]
+                # equations shape: (k,3)
+                # extended_payoff shape: (3,)
+                # equations @ extended_payoff is (k,)
+                dot = equations @ extended_payoff
+                all_in = True
+                for val in dot:
+                    if val > tol:
+                        all_in = False
+                        break
+                if all_in:
+                    W_new[n_new_pt, 0] = action_profile_payoff[0]
+                    W_new[n_new_pt, 1] = action_profile_payoff[1]
+                    n_new_pt += 1
+                    continue
+
+            # _find_C is imported from quantecon.game_theory.repeated_game and is njit
+            C, n = _find_C(new_pts, points, vertices, equations,
+                           extended_payoff, IC, tol)
+
+
+            for i in range(n):
+                W_new[n_new_pt, 0] = delta * C[i, 0] + (1-delta) * action_profile_payoff[0]
+                W_new[n_new_pt, 1] = delta * C[i, 1] + (1-delta) * action_profile_payoff[1]
+                n_new_pt += 1
+
+    return W_new, n_new_pt
+
+@njit(cache=True)
+def _update_u_numba(u, W):
+    """
+    Update the threat points if it not feasible in the new W,
+    by the minimum of new feasible payoffs.
+
+    Parameters
+    ----------
+    u : ndarray(float, ndim=1)
+        The threat points.
+
+    W : ndarray(float, ndim=1)
+        The points that construct the feasible payoff convex hull.
+
+    Returns
+    -------
+    u : ndarray(float, ndim=1)
+        The updated threat points.
+    """
+    for i in range(2):
+        W_min = np.min(W[:, i])
         if u[i] < W_min:
             u[i] = W_min
 
