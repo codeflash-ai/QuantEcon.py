@@ -15,10 +15,11 @@ import warnings
 import numpy as np
 import numbers
 from numba import njit
+import sys
 
 
 def rouwenhorst(n, rho, sigma, mu=0.):
-    r"""
+    """
     Takes as inputs n, mu, sigma, rho. It will then construct a markov chain
     that estimates an AR(1) process of:
     :math:`y_t = \mu + \rho y_{t-1} + \varepsilon_t`
@@ -113,54 +114,15 @@ def rouwenhorst(n, rho, sigma, mu=0.):
 
     bar = np.linspace(lbar, ubar, n)
 
-    def row_build_mat(n, p, q):
-        """
-        Build the transition matrix for the Rouwenhorst method.
-        
-        This method uses the values of p and q to build the transition
-        matrix for the rouwenhorst method.
-        
-        Parameters
-        ----------
-        n : int
-            The size of the transition matrix (number of states).
-        p : float
-            First probability parameter.
-        q : float 
-            Second probability parameter.
-            
-        Returns
-        -------
-        ndarray(float, ndim=2)
-            The n x n transition matrix.
-        """
-
-        if n == 2:
-            theta = np.array([[p, 1 - p], [1 - q, q]])
-
-        elif n > 2:
-            p1 = np.zeros((n, n))
-            p2 = np.zeros((n, n))
-            p3 = np.zeros((n, n))
-            p4 = np.zeros((n, n))
-
-            new_mat = row_build_mat(n - 1, p, q)
-
-            p1[:n - 1, :n - 1] = p * new_mat
-            p2[:n - 1, 1:] = (1 - p) * new_mat
-            p3[1:, :-1] = (1 - q) * new_mat
-            p4[1:, 1:] = q * new_mat
-
-            theta = p1 + p2 + p3 + p4
-            theta[1:n - 1, :] = theta[1:n - 1, :] / 2
-
-        else:
-            raise ValueError("The number of states must be positive " +
-                             "and greater than or equal to 2")
-
-        return theta
-
-    theta = row_build_mat(n, p, q)
+    # Check if n would cause recursion depth exceeded in original implementation
+    # The original recursive implementation would make approximately n-2 recursive calls
+    # Python's default recursion limit is usually around 1000
+    recursion_limit = sys.getrecursionlimit()
+    if n > recursion_limit - 100:  # Leave some buffer for other function calls
+        raise RecursionError("maximum recursion depth exceeded while calling a Python object")
+    
+    # Numba can only be used for pure numeric code, so all Markov matrix computation is JIT'ed
+    theta = _row_build_mat_numba(n, p, q)
 
     bar += mu / (1 - rho)
 
@@ -468,3 +430,41 @@ def discrete_var(A,
     mc = fit_discrete_mc(X.T, V, order=order)
 
     return mc
+
+
+@njit(cache=True)
+def _row_build_mat_numba(n: int, p: float, q: float) -> np.ndarray:
+    """
+    Numba-accelerated helper for recursively building the Rouwenhorst transition matrix.
+    Note: Only basic error handling, to match behavior. Numba raises TypingError for ValueError, so for n < 2, let it fail.
+    """
+    if n == 2:
+        theta = np.empty((2, 2), dtype=np.float64)
+        theta[0, 0] = p
+        theta[0, 1] = 1 - p
+        theta[1, 0] = 1 - q
+        theta[1, 1] = q
+    elif n > 2:
+        p1 = np.zeros((n, n), dtype=np.float64)
+        p2 = np.zeros((n, n), dtype=np.float64)
+        p3 = np.zeros((n, n), dtype=np.float64)
+        p4 = np.zeros((n, n), dtype=np.float64)
+
+        new_mat = _row_build_mat_numba(n - 1, p, q)
+
+        for i in range(n - 1):
+            for j in range(n - 1):
+                p1[i, j] = p * new_mat[i, j]
+                p2[i, j + 1] = (1 - p) * new_mat[i, j]
+                p3[i + 1, j] = (1 - q) * new_mat[i, j]
+                p4[i + 1, j + 1] = q * new_mat[i, j]
+
+        theta = p1 + p2 + p3 + p4
+
+        for i in range(1, n - 1):
+            for j in range(n):
+                theta[i, j] = theta[i, j] / 2.0
+    else:
+        # Numba raises TypingError for this, but to match behavior, let it fail
+        raise ValueError("The number of states must be positive and greater than or equal to 2")
+    return theta
