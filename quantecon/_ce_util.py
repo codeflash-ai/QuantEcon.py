@@ -9,8 +9,8 @@ Miranda, Mario J, and Paul L Fackler. Applied Computational Economics
 and Finance, MIT Press, 2002.
 
 """
-from functools import reduce
 import numpy as np
+from numba import njit
 
 
 def ckron(*arrays):
@@ -38,7 +38,7 @@ def ckron(*arrays):
     Economics and Finance, MIT Press, 2002.
 
     """
-    return reduce(np.kron, arrays)
+    return _ckron_impl(arrays)
 
 
 def gridmake(*arrays):
@@ -69,15 +69,7 @@ def gridmake(*arrays):
 
     """
     if all([i.ndim == 1 for i in arrays]):
-        d = len(arrays)
-        if d == 2:
-            out = _gridmake2(*arrays)
-        else:
-            out = _gridmake2(arrays[0], arrays[1])
-            for arr in arrays[2:]:
-                out = _gridmake2(out, arr)
-
-        return out
+        return _gridmake_impl(arrays)
     else:
         raise NotImplementedError("Come back here")
 
@@ -121,3 +113,47 @@ def _gridmake2(x1, x2):
         return np.column_stack([first, second])
     else:
         raise NotImplementedError("Come back here")
+
+@njit(cache=True)
+def _ckron_impl(arrays):
+    acc = arrays[0]
+    for i in range(1, len(arrays)):
+        acc = np.kron(acc, arrays[i])
+    return acc
+
+@njit(cache=True)
+def _gridmake2_impl(x1, x2):
+    if x1.ndim == 1 and x2.ndim == 1:
+        n1 = x1.shape[0]
+        n2 = x2.shape[0]
+        result = np.empty((n1 * n2, 2), dtype=x1.dtype)
+        for i in range(n2):
+            for j in range(n1):
+                result[i * n1 + j, 0] = x1[j]
+                result[i * n1 + j, 1] = x2[i]
+        return result
+    elif x1.ndim > 1 and x2.ndim == 1:
+        n1 = x1.shape[0]
+        n2 = x2.shape[0]
+        first = np.empty((n1 * n2, x1.shape[1]), dtype=x1.dtype)
+        for i in range(n2):
+            for j in range(n1):
+                first[i * n1 + j, :] = x1[j, :]
+        second = np.empty(n1 * n2, dtype=x2.dtype)
+        for i in range(n2):
+            for j in range(n1):
+                second[i * n1 + j] = x2[i]
+        return np.column_stack((first, second))
+    else:
+        raise NotImplementedError("Come back here")
+
+@njit(cache=True)
+def _gridmake_impl(arrays):
+    d = len(arrays)
+    if d == 2:
+        out = _gridmake2_impl(arrays[0], arrays[1])
+    else:
+        out = _gridmake2_impl(arrays[0], arrays[1])
+        for i in range(2, d):
+            out = _gridmake2_impl(out, arrays[i])
+    return out
