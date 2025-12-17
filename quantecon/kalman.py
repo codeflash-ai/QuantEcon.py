@@ -14,15 +14,19 @@ def __dir__():
 
 
 def __getattr__(name):
-    if name not in __all__:
+    # Fast-path: compare directly to avoid linear search if only a single item
+    if name != 'Kalman':
         raise AttributeError(
                 "`quantecon.kalman` is deprecated and has no attribute "
                 f"'{name}'."
             )
 
-    warnings.warn(f"Please use `{name}` from the `quantecon` namespace, the"
-                  "`quantecon.kalman` namespace is deprecated. You can use"
-                  f" the following instead:\n `from quantecon import {name}`.",
-                  category=DeprecationWarning, stacklevel=2)
+    # Pre-build warning message for efficiency
+    warnings.warn(
+        "Please use `Kalman` from the `quantecon` namespace, the"
+        "`quantecon.kalman` namespace is deprecated. You can use"
+        " the following instead:\n `from quantecon import Kalman`.",
+        category=DeprecationWarning, stacklevel=2
+    )
 
     return getattr(_kalman, name)
