@@ -11,6 +11,7 @@ and Finance, MIT Press, 2002.
 """
 from functools import reduce
 import numpy as np
+from numba import njit
 
 
 def ckron(*arrays):
@@ -82,6 +83,7 @@ def gridmake(*arrays):
         raise NotImplementedError("Come back here")
 
 
+@njit(cache=True)
 def _gridmake2(x1, x2):
     """
     Expands two vectors (or matrices) into a matrix where rows span the
@@ -113,11 +115,23 @@ def _gridmake2(x1, x2):
 
     """
     if x1.ndim == 1 and x2.ndim == 1:
-        return np.column_stack([np.tile(x1, x2.shape[0]),
-                               np.repeat(x2, x1.shape[0])])
+        n1 = x1.shape[0]
+        n2 = x2.shape[0]
+        out = np.empty((n1 * n2, 2), x1.dtype)
+        for i in range(n2):
+            for j in range(n1):
+                out[i * n1 + j, 0] = x1[j]
+                out[i * n1 + j, 1] = x2[i]
+        return out
     elif x1.ndim > 1 and x2.ndim == 1:
-        first = np.tile(x1, (x2.shape[0], 1))
-        second = np.repeat(x2, x1.shape[0])
-        return np.column_stack([first, second])
+        N1, k = x1.shape
+        N2 = x2.shape[0]
+        out = np.empty((N1 * N2, k + 1), x1.dtype)
+        for i in range(N2):
+            for j in range(N1):
+                for a in range(k):
+                    out[i * N1 + j, a] = x1[j, a]
+                out[i * N1 + j, k] = x2[i]
+        return out
     else:
         raise NotImplementedError("Come back here")
