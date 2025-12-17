@@ -3,7 +3,7 @@ Utility routines for the markov submodule
 
 """
 import numpy as np
-from numba import jit
+from numba import njit, jit
 
 
 @jit(nopython=True, cache=True)
@@ -52,7 +52,7 @@ def sa_indices(num_states, num_actions):
     return s_indices, a_indices
 
 
-@jit(nopython=True, cache=True)
+@njit(cache=True)
 def _fill_dense_Q(s_indices, a_indices, Q_in, Q_out):
     L = Q_in.shape[0]
     for i in range(L):
