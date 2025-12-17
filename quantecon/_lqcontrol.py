@@ -10,6 +10,7 @@ from scipy.linalg import solve
 from ._matrix_eqn import solve_discrete_riccati, solve_discrete_riccati_system
 from .util import check_random_state
 from .markov import MarkovChain
+import numba
 
 
 class LQ:
@@ -235,19 +236,15 @@ class LQ:
         Q, R, A, B, N, C = self.Q, self.R, self.A, self.B, self.N, self.C
 
         # === solve Riccati equation, obtain P === #
-        A0, B0 = np.sqrt(self.beta) * A, np.sqrt(self.beta) * B
+        beta_sqrt = np.sqrt(self.beta)
+        A0 = beta_sqrt * A
+        B0 = beta_sqrt * B
         P = solve_discrete_riccati(A0, B0, R, Q, N, method=method)
 
-        # == Compute F == #
-        S1 = Q + self.beta * (B.T @ P @ B)
-        S2 = self.beta * (B.T @ P @ A) + N
-        F = solve(S1, S2)
+        # == Compute F, d using JIT helper == #
+        _, _, F, d = _jit_matrix_computations(Q, R, A, B, N, C, self.beta, P)
 
-        # == Compute d == #
-        if self.beta == 1:
-            d = 0
-        else:
-            d = self.beta * np.trace(P @ C @ C.T) / (1 - self.beta)
+        # == Bind states and return values == #
 
         # == Bind states and return values == #
         self.P, self.F, self.d = P, F, d
@@ -622,3 +619,20 @@ class LQMarkov:
         x_path[:, T] = Ax + Bu + Cw_path[:, T]
 
         return x_path, u_path, w_path, state
+
+
+@numba.njit(cache=True)
+def _jit_matrix_computations(Q, R, A, B, N, C, beta, P):
+    """
+    JIT-compiled helper for stationary_values matrix computations.
+    Returns S1, S2, F, and d.
+    """
+    S1 = Q + beta * (B.T @ P @ B)
+    S2 = beta * (B.T @ P @ A) + N
+    # SciPy's solve isn't numba-compatible, so fallback to np.linalg.solve
+    F = np.linalg.solve(S1, S2)
+    if beta == 1.0:
+        d = 0.0
+    else:
+        d = beta * np.trace(P @ C @ C.T) / (1.0 - beta)
+    return S1, S2, F, d
