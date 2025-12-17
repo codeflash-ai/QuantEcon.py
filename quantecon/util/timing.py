@@ -5,6 +5,7 @@ Provides Matlab-like tic, tac and toc functions.
 import time
 import numpy as np
 from ..timings.timings import get_default_precision
+from numba import njit
 
 
 class __Timer__:
@@ -161,8 +162,9 @@ class __Timer__:
         print("Total run time: %d:%02d:%0d.%0*d" %
               (h, m, s, digits, (s % 1)*(10**digits)))
 
-        average_time = all_times.mean()
-        average_of_best = np.sort(all_times)[:best_of].mean()
+        average_time = _mean(all_times)
+        average_of_best = _mean(_sort_slice(all_times, best_of))
+
 
         if verbose:
             m, s = divmod(average_time, 60)
@@ -454,6 +456,27 @@ def toc(verbose=True, digits=2):
 
 def loop_timer(n, function, args=None, verbose=True, digits=2, best_of=3):
     return __timer__.loop_timer(n, function, args, verbose, digits, best_of)
+
+
+
+@njit(cache=True, fastmath=True)
+def _mean(arr: np.ndarray) -> float:
+    total = 0.0
+    n = arr.size
+    for i in range(n):
+        total += arr[i]
+    return total / n if n > 0 else 0.0
+
+@njit(cache=True, fastmath=True)
+def _sort_slice(arr: np.ndarray, best_of: int) -> np.ndarray:
+    arr_copy = np.empty(arr.size)
+    for i in range(arr.size):
+        arr_copy[i] = arr[i]
+    arr_sorted = np.sort(arr_copy)
+    result = np.empty(best_of)
+    for i in range(best_of):
+        result[i] = arr_sorted[i]
+    return result
 
 
 # Set docstring
