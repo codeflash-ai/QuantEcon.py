@@ -91,20 +91,36 @@ def hh_payoff_player(
     ))
     my_player: Player = nfg.players[my_player_number]
     my_payoffs = my_player.payoff_array
-    hh_actions_and_payoffs = np.vstack([
-        np.hstack(
-            [
-                np.eye(nfg.nums_actions[p])[action_combination[p]]
-                for p in range(nfg.N) if p != my_player_number
-            ] + [
-                my_payoffs[
-                    action_combination[my_player_number:]
-                    + action_combination[:my_player_number]
-                ]
-            ]
-        )
-        for action_combination in action_combinations
-    ])
+    
+    # Pre-calculate dimensions for efficient array construction
+    total_other_actions = sum(nfg.nums_actions[p] for p in range(nfg.N) if p != my_player_number)
+    
+    # Build arrays more efficiently by pre-allocating and direct assignment
+    action_combinations_list = list(action_combinations)
+    num_combinations = len(action_combinations_list)
+    
+    hh_actions_and_payoffs = np.empty((num_combinations, total_other_actions + 1))
+    
+    for idx, action_combination in enumerate(action_combinations_list):
+        # Build one-hot encoding for all other players' actions
+        row = np.zeros(total_other_actions)
+        col_offset = 0
+        for p in range(nfg.N):
+            if p != my_player_number:
+                action_idx = action_combination[p]
+                row[col_offset + action_idx] = 1.0
+                col_offset += nfg.nums_actions[p]
+        
+        # Get payoff with proper indexing
+        payoff = my_payoffs[
+            action_combination[my_player_number:]
+            + action_combination[:my_player_number]
+        ]
+        
+        # Assign to pre-allocated array
+        hh_actions_and_payoffs[idx, :-1] = row
+        hh_actions_and_payoffs[idx, -1] = payoff
+
     hh_actions = hh_actions_and_payoffs[:, :-1]
     combined_payoffs = hh_actions_and_payoffs[:, -1]
 
