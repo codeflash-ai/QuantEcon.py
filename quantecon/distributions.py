@@ -10,6 +10,8 @@ http://en.wikipedia.org/wiki/Beta-binomial_distribution
 from math import sqrt
 import numpy as np
 from scipy.special import binom, beta
+import math
+from numba import njit
 
 
 class BetaBinomial:
@@ -94,9 +96,7 @@ class BetaBinomial:
             Vector of probabilities over k
 
         """
-        n, a, b = self.n, self.a, self.b
-        k = np.arange(n + 1)
-        probs = binom(n, k) * beta(k + a, n - k + b) / beta(a, b)
+        probs = _pdf_numba(self.n, self.a, self.b)
         return probs
 
     # def cdf(self):
@@ -128,3 +128,32 @@ class BetaBinomial:
     #         Vector of probabilities over k
 
     #     """
+
+
+@njit(cache=True)
+def _binom_numba(n, k):
+    # Computes binomial coefficient array: n choose k for all k
+    # Uses gamma function generalization to match scipy.special.binom behavior
+    out = np.empty_like(k, dtype=np.float64)
+    for i in range(k.size):
+        ki = k[i]
+        # Use gamma function generalization (works for non-integer n as well)
+        out[i] = math.exp(math.lgamma(n + 1) - math.lgamma(ki + 1) - math.lgamma(n - ki + 1))
+    return out
+
+@njit(cache=True)
+def _beta_numba(a, b):
+    # Computes beta function Beta(a, b) for each element pair
+    out = np.empty_like(a, dtype=np.float64)
+    for i in range(a.size):
+        out[i] = math.exp(math.lgamma(a[i]) + math.lgamma(b[i]) - math.lgamma(a[i] + b[i]))
+    return out
+
+@njit(cache=True)
+def _pdf_numba(n, a, b):
+    k = np.arange(n + 1)
+    binom_terms = _binom_numba(n, k)
+    beta_terms = _beta_numba(k + a, n - k + b)
+    beta_ab = math.exp(math.lgamma(a) + math.lgamma(b) - math.lgamma(a + b))
+    probs = binom_terms * beta_terms / beta_ab
+    return probs
