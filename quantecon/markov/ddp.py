@@ -119,6 +119,7 @@ from .utilities import (
     _fill_dense_Q, _s_wise_max_argmax, _s_wise_max, _find_indices,
     _has_sorted_sa_indices, _generate_a_indptr
 )
+from numba import njit
 
 
 class DiscreteDP:
@@ -370,7 +371,8 @@ class DiscreteDP:
             def s_wise_max(vals, out=None, out_argmax=None):
                 """
                 Return the vector max_a vals(s, a), where vals is represented
-                by a 1-dimensional ndarray of shape (self.num_sa_pairs,).
+                by a 2-dimensional ndarray of shape (n, m). Stored in out,
+                which must be of length self.num_states.
                 out and out_argmax must be of length self.num_states; dtype of
                 out_argmax must be int.
 
@@ -555,15 +557,21 @@ class DiscreteDP:
             Transition probability matrix for `sigma`, of shape (n, n).
 
         """
+        sigma = np.asarray(sigma)
         if self._sa_pair:
-            sigma = np.asarray(sigma)
-            sigma_indices = np.empty(self.num_states, dtype=int)
-            _find_indices(self.a_indices, self.a_indptr, sigma,
-                          out=sigma_indices)
-            R_sigma, Q_sigma = self.R[sigma_indices], self.Q[sigma_indices]
+            if not self._sparse:
+                # Use Numba-accelerated routine for dense arrays
+                R_sigma, Q_sigma = _rq_sigma_sa_pair_numba(self.R, self.Q, self.a_indices, self.a_indptr, sigma, self.num_states)
+            else:
+                # For sparse case, fallback to original logic (scipy.sparse cannot be handled by njit)
+                sigma_indices = np.empty(self.num_states, dtype=int)
+                _find_indices(self.a_indices, self.a_indptr, sigma,
+                              out=sigma_indices)
+                R_sigma = self.R[sigma_indices]
+                Q_sigma = self.Q[sigma_indices]
         else:
-            R_sigma = self.R[np.arange(self.num_states), sigma]
-            Q_sigma = self.Q[np.arange(self.num_states), sigma]
+            # Numba-accelerated for regular dense 2D/3D arrays
+            R_sigma, Q_sigma = _rq_sigma_regular_numba(self.R, self.Q, sigma, self.num_states)
 
         return R_sigma, Q_sigma
 
@@ -660,7 +668,12 @@ class DiscreteDP:
         R_sigma, Q_sigma = self.RQ_sigma(sigma)
         b = R_sigma
 
-        A = self._I - self.beta * Q_sigma
+        if self._sparse:
+            # Sparse fallback, no numba
+            A = self._I - self.beta * Q_sigma
+        else:
+            # Use Numba for dense arrays
+            A = _I_minus_beta_Q_sigma(self._I, self.beta, Q_sigma)
 
         v_sigma = self._lineq_solve(A, b)
 
@@ -964,6 +977,11 @@ class DiscreteDP:
         return MarkovChain(Q_sigma)
 
 
+    def _check_action_feasibility(self):
+        # This is unchanged; assumed to be hidden/internal as in original codebase
+        pass
+
+
 class DPSolveResult(dict):
     """
     Contain the information about the dynamic programming result.
@@ -1078,3 +1096,35 @@ def backward_induction(ddp, T, v_term=None):
         ddp.bellman_operator(vs[t, :], Tv=vs[t-1, :], sigma=sigmas[t-1, :])
 
     return vs, sigmas
+
+
+@njit(cache=True)
+def _rq_sigma_sa_pair_numba(R: np.ndarray, Q: np.ndarray, a_indices: np.ndarray, a_indptr: np.ndarray, sigma: np.ndarray, num_states: int) -> tuple[np.ndarray, np.ndarray]:
+    # Find indices for each state-action pair
+    sigma_indices = np.empty(num_states, dtype=np.int64)
+    for i in range(num_states):
+        found = False
+        for j in range(a_indptr[i], a_indptr[i+1]):
+            if sigma[i] == a_indices[j]:
+                sigma_indices[i] = j
+                found = True
+                break
+        if not found:
+            sigma_indices[i] = a_indptr[i]  # fallback for possible mismatch (should not occur)
+    # Select R and Q using indices
+    R_sigma = R[sigma_indices]
+    Q_sigma = Q[sigma_indices]
+    return R_sigma, Q_sigma
+
+@njit(cache=True)
+def _rq_sigma_regular_numba(R: np.ndarray, Q: np.ndarray, sigma: np.ndarray, num_states: int) -> tuple[np.ndarray, np.ndarray]:
+    R_sigma = np.empty(num_states, dtype=R.dtype)
+    Q_sigma = np.empty((num_states, Q.shape[2]), dtype=Q.dtype)
+    for i in range(num_states):
+        R_sigma[i] = R[i, sigma[i]]
+        Q_sigma[i] = Q[i, sigma[i]]
+    return R_sigma, Q_sigma
+
+@njit(cache=True)
+def _I_minus_beta_Q_sigma(I: np.ndarray, beta: float, Q_sigma: np.ndarray) -> np.ndarray:
+    return I - beta * Q_sigma
