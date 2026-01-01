@@ -119,6 +119,7 @@ from .utilities import (
     _fill_dense_Q, _s_wise_max_argmax, _s_wise_max, _find_indices,
     _has_sorted_sa_indices, _generate_a_indptr
 )
+from numba import njit
 
 
 class DiscreteDP:
@@ -590,11 +591,25 @@ class DiscreteDP:
             Updated value function vector, of length n.
 
         """
-        vals = self.R + self.beta * (self.Q @ v)  # Shape: (L,) or (n, m)
-
         if Tv is None:
             Tv = np.empty(self.num_states)
-        self.s_wise_max(vals, out=Tv, out_argmax=sigma)
+        
+        if self._sa_pair:
+            if self._sparse:
+                _bellman_operator_sa_pair(
+                    self.R, self.Q.data, self.Q.indices, self.Q.indptr,
+                    self.beta, v, self.a_indices, self.a_indptr, Tv, sigma
+                )
+            else:
+                _bellman_operator_sa_pair_dense(
+                    self.R, self.Q, self.beta, v,
+                    self.a_indices, self.a_indptr, Tv, sigma
+                )
+        else:
+            _bellman_operator_product(
+                self.R, self.Q, self.beta, v, Tv, sigma
+            )
+        
         return Tv
 
     def T_sigma(self, sigma):
@@ -1078,3 +1093,80 @@ def backward_induction(ddp, T, v_term=None):
         ddp.bellman_operator(vs[t, :], Tv=vs[t-1, :], sigma=sigmas[t-1, :])
 
     return vs, sigmas
+
+
+@njit(cache=True)
+def _bellman_operator_sa_pair(R, Q_data, Q_indices, Q_indptr, beta, v, a_indices, a_indptr, Tv, sigma):
+    """
+    Specialized Bellman operator for state-action pair formulation with sparse Q.
+    """
+    num_sa_pairs = len(R)
+    num_states = len(Tv)
+    
+    # Compute vals = R + beta * (Q @ v)
+    vals = np.empty(num_sa_pairs)
+    for i in range(num_sa_pairs):
+        q_dot_v = 0.0
+        for j in range(Q_indptr[i], Q_indptr[i+1]):
+            q_dot_v += Q_data[j] * v[Q_indices[j]]
+        vals[i] = R[i] + beta * q_dot_v
+    
+    # Compute state-wise max
+    if sigma is not None:
+        _s_wise_max_argmax(a_indices, a_indptr, vals, out_max=Tv, out_argmax=sigma)
+    else:
+        _s_wise_max(a_indices, a_indptr, vals, out_max=Tv)
+
+
+@njit(cache=True)
+def _bellman_operator_sa_pair_dense(R, Q, beta, v, a_indices, a_indptr, Tv, sigma):
+    """
+    Specialized Bellman operator for state-action pair formulation with dense Q.
+    """
+    num_sa_pairs = len(R)
+    num_states = len(Tv)
+    
+    # Compute vals = R + beta * (Q @ v)
+    vals = R + beta * (Q @ v)
+    
+    # Compute state-wise max
+    if sigma is not None:
+        _s_wise_max_argmax(a_indices, a_indptr, vals, out_max=Tv, out_argmax=sigma)
+    else:
+        _s_wise_max(a_indices, a_indptr, vals, out_max=Tv)
+
+
+@njit(cache=True)
+def _bellman_operator_product(R, Q, beta, v, Tv, sigma):
+    """
+    Specialized Bellman operator for product formulation (2D R, 3D Q).
+    """
+    num_states, num_actions = R.shape
+    
+    # Compute vals = R + beta * (Q @ v)
+    vals = np.empty((num_states, num_actions))
+    for s in range(num_states):
+        for a in range(num_actions):
+            q_dot_v = 0.0
+            for s_next in range(num_states):
+                q_dot_v += Q[s, a, s_next] * v[s_next]
+            vals[s, a] = R[s, a] + beta * q_dot_v
+    
+    # Compute state-wise max
+    if sigma is not None:
+        for s in range(num_states):
+            max_val = vals[s, 0]
+            max_a = 0
+            for a in range(1, num_actions):
+                if vals[s, a] > max_val:
+                    max_val = vals[s, a]
+                    max_a = a
+            Tv[s] = max_val
+            sigma[s] = max_a
+    else:
+        for s in range(num_states):
+            max_val = vals[s, 0]
+            for a in range(1, num_actions):
+                if vals[s, a] > max_val:
+                    max_val = vals[s, a]
+            Tv[s] = max_val
