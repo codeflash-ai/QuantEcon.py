@@ -11,6 +11,7 @@ and Finance, MIT Press, 2002.
 """
 from functools import reduce
 import numpy as np
+from numba import njit
 
 
 def ckron(*arrays):
@@ -82,6 +83,7 @@ def gridmake(*arrays):
         raise NotImplementedError("Come back here")
 
 
+@njit(cache=True, fastmath=True)
 def _gridmake2(x1, x2):
     """
     Expands two vectors (or matrices) into a matrix where rows span the
@@ -113,11 +115,28 @@ def _gridmake2(x1, x2):
 
     """
     if x1.ndim == 1 and x2.ndim == 1:
-        return np.column_stack([np.tile(x1, x2.shape[0]),
-                               np.repeat(x2, x1.shape[0])])
+        m = x1.shape[0]
+        n = x2.shape[0]
+        temp = np.empty(1, dtype=x1.dtype) + np.empty(1, dtype=x2.dtype)
+        result_dtype = temp.dtype
+        out = np.empty((m * n, 2), dtype=result_dtype)
+        for j in range(n):
+            for i in range(m):
+                out[j * m + i, 0] = x1[i]
+                out[j * m + i, 1] = x2[j]
+        return out
     elif x1.ndim > 1 and x2.ndim == 1:
-        first = np.tile(x1, (x2.shape[0], 1))
-        second = np.repeat(x2, x1.shape[0])
-        return np.column_stack([first, second])
+        m = x1.shape[0]
+        n = x2.shape[0]
+        k = x1.shape[1]
+        temp = np.empty(1, dtype=x1.dtype) + np.empty(1, dtype=x2.dtype)
+        result_dtype = temp.dtype
+        out = np.empty((m * n, k + 1), dtype=result_dtype)
+        for j in range(n):
+            for i in range(m):
+                for col in range(k):
+                    out[j * m + i, col] = x1[i, col]
+                out[j * m + i, k] = x2[j]
+        return out
     else:
         raise NotImplementedError("Come back here")
