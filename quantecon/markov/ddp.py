@@ -994,10 +994,9 @@ class DPSolveResult(dict):
     """
     # This is sourced from sicpy.optimize.OptimizeResult.
     def __getattr__(self, name):
-        try:
+        if name in self:
             return self[name]
-        except KeyError:
-            raise AttributeError(name)
+        raise AttributeError(name)
 
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
