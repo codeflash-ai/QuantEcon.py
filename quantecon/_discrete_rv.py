@@ -28,10 +28,11 @@ class DiscreteRV:
 
     def __init__(self, q):
         self._q = np.asarray(q)
-        self.Q = np.cumsum(q)
+        self.Q = np.cumsum(self._q)
+        self._repr_cache = "DiscreteRV with {n} elements".format(n=self._q.size)
 
     def __repr__(self):
-        return "DiscreteRV with {n} elements".format(n=self._q.size)
+        return self._repr_cache
 
     def __str__(self):
         return self.__repr__()
