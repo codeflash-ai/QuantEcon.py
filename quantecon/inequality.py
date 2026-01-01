@@ -5,6 +5,8 @@
 import warnings
 from . import _inequality
 
+_warned_attributes = set()
+
 
 __all__ = ['lorenz_curve', 'gini_coefficient', 'shorrocks_index', 'rank_size']
 
@@ -20,9 +22,11 @@ def __getattr__(name):
                 f"'{name}'."
             )
 
-    warnings.warn(f"Please use `{name}` from the `quantecon` namespace, the"
-                  "`quantecon.inequality` namespace is deprecated. You can use"
-                  f" the following instead:\n `from quantecon import {name}`.",
-                  category=DeprecationWarning, stacklevel=2)
+    if name not in _warned_attributes:
+        warnings.warn(f"Please use `{name}` from the `quantecon` namespace, the"
+                      "`quantecon.inequality` namespace is deprecated. You can use"
+                      f" the following instead:\n `from quantecon import {name}`.",
+                      category=DeprecationWarning, stacklevel=2)
+        _warned_attributes.add(name)
 
     return getattr(_inequality, name)
