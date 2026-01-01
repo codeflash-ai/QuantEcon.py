@@ -11,6 +11,7 @@ and Finance, MIT Press, 2002.
 """
 from functools import reduce
 import numpy as np
+from numba import njit
 
 
 def ckron(*arrays):
@@ -112,12 +113,41 @@ def _gridmake2(x1, x2):
     and Finance, MIT Press, 2002.
 
     """
+    dtype = np.result_type(x1.dtype, x2.dtype)
+    
     if x1.ndim == 1 and x2.ndim == 1:
-        return np.column_stack([np.tile(x1, x2.shape[0]),
-                               np.repeat(x2, x1.shape[0])])
+        return _gridmake2_1d_1d(x1, x2, dtype)
     elif x1.ndim > 1 and x2.ndim == 1:
-        first = np.tile(x1, (x2.shape[0], 1))
-        second = np.repeat(x2, x1.shape[0])
-        return np.column_stack([first, second])
+        return _gridmake2_nd_1d(x1, x2, dtype)
     else:
         raise NotImplementedError("Come back here")
+
+
+@njit
+def _gridmake2_1d_1d(x1, x2, dtype):
+    n1 = x1.shape[0]
+    n2 = x2.shape[0]
+    out = np.empty((n1 * n2, 2), dtype=dtype)
+    
+    for i in range(n2):
+        start_idx = i * n1
+        end_idx = start_idx + n1
+        out[start_idx:end_idx, 0] = x1
+        out[start_idx:end_idx, 1] = x2[i]
+    
+    return out
+
+@njit
+def _gridmake2_nd_1d(x1, x2, dtype):
+    n1 = x1.shape[0]
+    n2 = x2.shape[0]
+    ncols1 = x1.shape[1]
+    out = np.empty((n1 * n2, ncols1 + 1), dtype=dtype)
+    
+    for i in range(n2):
+        start_idx = i * n1
+        end_idx = start_idx + n1
+        out[start_idx:end_idx, :ncols1] = x1
+        out[start_idx:end_idx, ncols1] = x2[i]
+    
+    return out
