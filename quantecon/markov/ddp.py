@@ -116,9 +116,10 @@ import scipy.sparse as sp
 from .core import MarkovChain
 from ._ddp_linprog_simplex import ddp_linprog_simplex
 from .utilities import (
-    _fill_dense_Q, _s_wise_max_argmax, _s_wise_max, _find_indices,
+    _fill_dense_Q, _find_indices,
     _has_sorted_sa_indices, _generate_a_indptr
 )
+from numba import njit
 
 
 class DiscreteDP:
@@ -370,7 +371,8 @@ class DiscreteDP:
             def s_wise_max(vals, out=None, out_argmax=None):
                 """
                 Return the vector max_a vals(s, a), where vals is represented
-                by a 1-dimensional ndarray of shape (self.num_sa_pairs,).
+                by a 2-dimensional ndarray of shape (n, m). Stored in out,
+                which must be of length self.num_states.
                 out and out_argmax must be of length self.num_states; dtype of
                 out_argmax must be int.
 
@@ -378,11 +380,11 @@ class DiscreteDP:
                 if out is None:
                     out = np.empty(self.num_states)
                 if out_argmax is None:
-                    _s_wise_max(self.a_indices, self.a_indptr, vals,
-                                out_max=out)
+                    # Use fast Numba JIT for maximization if no argmax requested
+                    _numba_s_wise_max(self.a_indices, self.a_indptr, vals, out)
                 else:
-                    _s_wise_max_argmax(self.a_indices, self.a_indptr, vals,
-                                       out_max=out, out_argmax=out_argmax)
+                    _numba_s_wise_max_argmax(
+                        self.a_indices, self.a_indptr, vals, out, out_argmax)
                 return out
 
             self.s_wise_max = s_wise_max
@@ -964,6 +966,25 @@ class DiscreteDP:
         return MarkovChain(Q_sigma)
 
 
+    def _check_action_feasibility(self):
+        """
+        Check that for every state, at least one action is feasible.
+        """
+        if self._sa_pair:
+            for s in range(self.num_states):
+                if self.a_indptr[s] == self.a_indptr[s + 1]:
+                    raise ValueError(
+                        f'For state {s}, no feasible actions in SA-pair data.'
+                    )
+        else:
+            valid_actions = (self.R > -np.inf).any(axis=1)
+            if not np.all(valid_actions):
+                bad_states = np.nonzero(~valid_actions)[0]
+                raise ValueError(
+                    f'For states {bad_states}, no feasible actions in (n, m) data.'
+                )
+
+
 class DPSolveResult(dict):
     """
     Contain the information about the dynamic programming result.
@@ -1078,3 +1099,38 @@ def backward_induction(ddp, T, v_term=None):
         ddp.bellman_operator(vs[t, :], Tv=vs[t-1, :], sigma=sigmas[t-1, :])
 
     return vs, sigmas
+
+
+def _numba_s_wise_max(a_indices: np.ndarray, a_indptr: np.ndarray,
+                      vals: np.ndarray,
+                      out_max: np.ndarray):
+    """
+    NumPy/Numba-optimized state-wise maximization for 1D sa_pair branch.
+    """
+    num_states = len(a_indptr) - 1
+    for s in range(num_states):
+        start = a_indptr[s]
+        end = a_indptr[s + 1]
+        local_max = vals[start]
+        for j in range(start + 1, end):
+            if vals[j] > local_max:
+                local_max = vals[j]
+        out_max[s] = local_max
+
+@njit(cache=True)
+def _numba_s_wise_max_argmax(a_indices: np.ndarray, a_indptr: np.ndarray,
+                             vals: np.ndarray,
+                             out_max: np.ndarray,
+                             out_argmax: np.ndarray):
+    num_states = len(a_indptr) - 1
+    for s in range(num_states):
+        start = a_indptr[s]
+        end = a_indptr[s + 1]
+        local_max = vals[start]
+        local_argmax = a_indices[start]
+        for j in range(start + 1, end):
+            if vals[j] > local_max:
+                local_max = vals[j]
+                local_argmax = a_indices[j]
+        out_max[s] = local_max
+        out_argmax[s] = local_argmax
