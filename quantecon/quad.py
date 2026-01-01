@@ -305,7 +305,7 @@ def qnwnorm(n, mu=None, sig2=None, usesqrtm=False):
         sig2 = np.atleast_1d(sig2).reshape(d, d)
 
     if all([x.size == 1 for x in [n, mu, sig2]]):
-        nodes, weights = _qnwnorm1(n[0])
+        nodes, weights = _process_single_node(n[0], mu, sig2)
     else:
         nodes = []
         weights = []
@@ -318,15 +318,16 @@ def qnwnorm(n, mu=None, sig2=None, usesqrtm=False):
         nodes = gridmake(*nodes)
         weights = ckron(*weights[::-1])
 
-    if usesqrtm:
-        new_sig2 = la.sqrtm(sig2)
-    else:  # cholesky
-        new_sig2 = la.cholesky(sig2)
+        if usesqrtm:
+            new_sig2 = la.sqrtm(sig2)
+        else:  # cholesky
+            new_sig2 = la.cholesky(sig2)
 
-    if d > 1:
-        nodes = nodes @ new_sig2 + mu  # Broadcast ok
-    else:  # nodes @ new_sig2 will not be aligned in scalar case.
-        nodes = nodes * new_sig2 + mu
+        if d > 1:
+            nodes = nodes @ new_sig2 + mu  # Broadcast ok
+        else:  # nodes @ new_sig2 will not be aligned in scalar case.
+            nodes = nodes * new_sig2 + mu
+
 
     return nodes.squeeze(), weights
 
@@ -1228,3 +1229,24 @@ def _qnwgamma1(n, a=1.0, b=1.0, tol=3e-14):
         weights[i] = factor / (pp*n*p2)
 
     return nodes*b, weights
+
+
+@jit(nopython=True)
+def _cholesky_decomp(sig2):
+    """Helper function for Cholesky decomposition in nopython mode."""
+    return np.linalg.cholesky(sig2)
+
+
+@jit(nopython=True)
+def _process_single_node(n, mu, sig2):
+    """Process single dimension case in nopython mode."""
+    nodes, weights = _qnwnorm1(n)
+    d = mu.shape[0]
+    new_sig2 = _cholesky_decomp(sig2)
+    
+    if d > 1:
+        nodes = nodes @ new_sig2 + mu
+    else:
+        nodes = nodes * new_sig2[0, 0] + mu[0]
+    
+    return nodes, weights
