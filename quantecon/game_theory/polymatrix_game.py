@@ -82,31 +82,41 @@ def hh_payoff_player(
         Dictionary giving a (approximate) component
         of the payoff at each other player and their action.
     """
-    action_combinations = product(*(
-        [
-            range(nfg.nums_actions[p]) if p != my_player_number
-            else [my_action_number]
-            for p in range(nfg.N)
-        ]
-    ))
+    # Pre-compute action combinations as array for faster indexing
+    action_ranges = [
+        [my_action_number] if p == my_player_number else range(nfg.nums_actions[p])
+        for p in range(nfg.N)
+    ]
+    action_combinations = np.array(list(product(*action_ranges)), dtype=np.int32)
+    n_combinations = len(action_combinations)
+    
     my_player: Player = nfg.players[my_player_number]
     my_payoffs = my_player.payoff_array
-    hh_actions_and_payoffs = np.vstack([
-        np.hstack(
-            [
-                np.eye(nfg.nums_actions[p])[action_combination[p]]
-                for p in range(nfg.N) if p != my_player_number
-            ] + [
-                my_payoffs[
-                    action_combination[my_player_number:]
-                    + action_combination[:my_player_number]
-                ]
-            ]
-        )
-        for action_combination in action_combinations
-    ])
-    hh_actions = hh_actions_and_payoffs[:, :-1]
-    combined_payoffs = hh_actions_and_payoffs[:, -1]
+    
+    # Calculate total features dimension
+    total_features = sum(nfg.nums_actions[p] for p in range(nfg.N) if p != my_player_number)
+    
+    # Pre-allocate arrays
+    hh_actions = np.zeros((n_combinations, total_features), dtype=np.float64)
+    combined_payoffs = np.zeros(n_combinations, dtype=np.float64)
+    
+    # Build feature matrix and payoffs efficiently
+    col_offset = 0
+    for p in range(nfg.N):
+        if p != my_player_number:
+            # Set one-hot encoding directly
+            actions_p = action_combinations[:, p]
+            hh_actions[np.arange(n_combinations), col_offset + actions_p] = 1.0
+            col_offset += nfg.nums_actions[p]
+    
+    # Extract payoffs using advanced indexing
+    for i in range(n_combinations):
+        action_combination = action_combinations[i]
+        # Reorder indices for payoff array access
+        reordered = tuple(action_combination[my_player_number:]) + tuple(action_combination[:my_player_number])
+        combined_payoffs[i] = my_payoffs[reordered]
+
+    # Could use pinv, but this is clearer.
 
     # Could use pinv, but this is clearer.
     hh_payoffs_array, _, _, _ = np.linalg.lstsq(
