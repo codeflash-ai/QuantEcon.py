@@ -314,6 +314,20 @@ class PolymatrixGame:
         tuple[float, float]
             Tuple of minimum and maximum.
         """
-        min_p = min([np.min(M) for M in self.polymatrix.values()])
-        max_p = max([np.max(M) for M in self.polymatrix.values()])
+        vals = iter(self.polymatrix.values())
+        try:
+            first = next(vals)
+        except StopIteration:
+            # Preserve original behavior: min([]) would raise ValueError
+            raise ValueError("min() arg is an empty sequence")
+        # Use ndarray methods to keep numpy scalar types and semantics
+        min_p = first.min()
+        max_p = first.max()
+        for M in vals:
+            m = M.min()
+            if m < min_p:
+                min_p = m
+            Mx = M.max()
+            if Mx > max_p:
+                max_p = Mx
         return (min_p, max_p)
