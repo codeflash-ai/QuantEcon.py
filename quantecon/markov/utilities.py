@@ -112,12 +112,20 @@ def _has_sorted_sa_indices(s_indices, a_indices):
 
     """
     L = len(s_indices)
-    for i in range(L-1):
-        if s_indices[i] > s_indices[i+1]:
+    if L <= 1:
+        return True
+
+    prev_s = s_indices[0]
+    prev_a = a_indices[0]
+    for i in range(1, L):
+        s = s_indices[i]
+        if prev_s > s:
             return False
-        if s_indices[i] == s_indices[i+1]:
-            if a_indices[i] >= a_indices[i+1]:
+        if prev_s == s:
+            if prev_a >= a_indices[i]:
                 return False
+        prev_s = s
+        prev_a = a_indices[i]
     return True
 
 
