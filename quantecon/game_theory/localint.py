@@ -51,16 +51,39 @@ class LocalInteraction:
         self.tie_breaking = 'smallest'
 
     def _play(self, actions, player_ind, tie_breaking, tol, random_state):
-        actions_matrix = sparse.csr_matrix(
-            (np.ones(self.N, dtype=int), actions, np.arange(self.N+1)),
-            shape=(self.N, self.num_actions))
+        # Compute weighted counts of neighbors' actions without building
+        # a per-iteration sparse/dense action matrix. Use CSR internals
+        # and np.bincount for efficient aggregation.
+        adj = self.adj_matrix
+        indptr = adj.indptr
+        indices = adj.indices
+        data = adj.data
 
-        opponent_act_dict = (self.adj_matrix[player_ind] @
-            actions_matrix).toarray()
+        # Convert actions to array for fast indexed access
+        actions_arr = np.asarray(actions, dtype=np.intp)
+
+        m = len(player_ind)
+        # Use float64 for accumulated weighted sums (matches typical sparse behavior)
+        opponent_act = np.zeros((m, self.num_actions), dtype=float)
+
+        for k, p in enumerate(player_ind):
+            s = indptr[p]
+            e = indptr[p + 1]
+            if s < e:
+                neigh = indices[s:e]
+                w = data[s:e]
+                # actions_arr indexed by neighbors -> 1D int array of action indices
+                act_idxs = actions_arr[neigh]
+                # Aggregate weights per action index
+                opponent_act[k, :] = np.bincount(act_idxs, weights=w, minlength=self.num_actions)
+            else:
+                # No neighbors -> zeros (already set)
+                pass
+
 
         for k, i in enumerate(player_ind):
             actions[i] = self.players[i].best_response(
-                opponent_act_dict[k, :], tie_breaking=tie_breaking,
+                opponent_act[k, :], tie_breaking=tie_breaking,
                 tol=tol, random_state=random_state
             )
 
@@ -111,7 +134,6 @@ class LocalInteraction:
             player_ind_seq = [None] * num_reps
         elif revision == 'asynchronous':
             if player_ind_seq is None:
-                random_state = check_random_state(random_state)
                 player_ind_seq = rng_integers(random_state, self.N,
                                               size=num_reps)
             elif isinstance(player_ind_seq, numbers.Integral):
