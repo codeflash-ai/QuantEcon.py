@@ -119,6 +119,7 @@ from .utilities import (
     _fill_dense_Q, _s_wise_max_argmax, _s_wise_max, _find_indices,
     _has_sorted_sa_indices, _generate_a_indptr
 )
+import numba
 
 
 class DiscreteDP:
@@ -370,7 +371,8 @@ class DiscreteDP:
             def s_wise_max(vals, out=None, out_argmax=None):
                 """
                 Return the vector max_a vals(s, a), where vals is represented
-                by a 1-dimensional ndarray of shape (self.num_sa_pairs,).
+                by a 2-dimensional ndarray of shape (n, m). Stored in out,
+                which must be of length self.num_states.
                 out and out_argmax must be of length self.num_states; dtype of
                 out_argmax must be int.
 
@@ -703,7 +705,7 @@ class DiscreteDP:
 
         for i in range(max_iter):
             new_v = T(v, *args, **kwargs)
-            if tol is not None and np.abs(new_v - v).max() < tol:
+            if tol is not None and _max_abs_diff(new_v, v) < tol:
                 v[:] = new_v
                 break
             v[:] = new_v
@@ -867,12 +869,6 @@ class DiscreteDP:
         if epsilon is None:
             epsilon = self.epsilon
 
-        def span(z):
-            return z.max() - z.min()
-
-        def midrange(z):
-            return (z.min() + z.max()) / 2
-
         v = np.empty(self.num_states)
         if v_init is None:
             v[:] = self.R[self.R > -np.inf].min() / (1 - self.beta)
@@ -887,12 +883,16 @@ class DiscreteDP:
         except ZeroDivisionError:  # Raised if beta = 0
             tol = np.inf
 
+
+        beta_factor = self.beta / (1 - self.beta)
+
         for i in range(max_iter):
             # Policy improvement
             self.bellman_operator(v, Tv=u, sigma=sigma)
             diff = u - v
-            if span(diff) < tol:
-                v[:] = u + midrange(diff) * self.beta / (1 - self.beta)
+            span_diff = _span(diff)
+            if span_diff < tol:
+                v[:] = u + _midrange(diff) * beta_factor
                 break
             # Partial policy evaluation with k iterations
             self.operator_iteration(T=self.T_sigma(sigma), v=u, max_iter=k)
@@ -1078,3 +1078,26 @@ def backward_induction(ddp, T, v_term=None):
         ddp.bellman_operator(vs[t, :], Tv=vs[t-1, :], sigma=sigmas[t-1, :])
 
     return vs, sigmas
+
+
+@numba.njit(cache=True)
+def _span(z):
+    """Compute span (max - min) of array z."""
+    return z.max() - z.min()
+
+
+@numba.njit(cache=True)
+def _midrange(z):
+    """Compute midrange ((min + max) / 2) of array z."""
+    return (z.min() + z.max()) / 2
+
+
+@numba.njit(cache=True)
+def _max_abs_diff(a, b):
+    """Compute maximum absolute difference between arrays a and b."""
+    max_diff = 0.0
+    for i in range(len(a)):
+        diff = abs(a[i] - b[i])
+        if diff > max_diff:
+            max_diff = diff
+    return max_diff
