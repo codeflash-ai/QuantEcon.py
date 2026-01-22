@@ -6,6 +6,7 @@ from scipy.special import comb
 from numba import jit
 
 from .numba import comb_jit
+from math import comb
 
 
 @jit(nopython=True, cache=True)
@@ -96,7 +97,13 @@ def k_array_rank(a):
     k = len(a)
     idx = int(a[0])  # Convert to Python int
     for i in range(1, k):
-        idx += comb(a[i], i+1, exact=True)
+        n = int(a[i])
+        r = i + 1
+        # SciPy's comb(..., exact=True) returns 0 for n < r; math.comb would raise,
+        # so match SciPy's behavior by skipping when n < r.
+        if n < r:
+            continue
+        idx += comb(n, r)
     return idx
 
 
