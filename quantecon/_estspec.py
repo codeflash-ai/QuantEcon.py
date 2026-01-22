@@ -3,7 +3,7 @@ Functions for working with periodograms of scalar data.
 
 """
 import numpy as np
-from numpy.fft import fft
+from numpy.fft import fft, rfft
 
 
 def smooth(x, window_len=7, window='hanning'):
@@ -100,7 +100,10 @@ def periodogram(x, window=None, window_len=7):
 
     """
     n = len(x)
-    I_w = np.abs(fft(x))**2 / n
+    if np.isrealobj(x):
+        I_w = np.abs(rfft(x))**2 / n
+    else:
+        I_w = np.abs(fft(x))**2 / n
     w = 2 * np.pi * np.arange(n) / n  # Fourier frequencies
     w, I_w = w[:int(n/2)+1], I_w[:int(n/2)+1]  # Take only values on [0, pi]
     if window:
