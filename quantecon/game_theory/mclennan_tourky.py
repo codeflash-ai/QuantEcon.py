@@ -7,7 +7,6 @@ response correspondence.
 import numbers
 import numpy as np
 from .._compute_fp import _compute_fixed_point_ig
-from .normal_form_game import pure2mixed
 from .utilities import NashResult
 
 
@@ -286,11 +285,23 @@ def _flatten_action_profile(action_profile, indptr):
     out = np.empty(indptr[-1])
 
     for i in range(N):
-        if isinstance(action_profile[i], numbers.Integral):  # pure action
-            num_actions = indptr[i+1] - indptr[i]
-            mixed_action = pure2mixed(num_actions, action_profile[i])
+        start = indptr[i]
+        end = indptr[i + 1]
+        ai = action_profile[i]
+        if isinstance(ai, numbers.Integral):  # pure action
+            num_actions = end - start
+            # Validate action is in bounds (matches original behavior)
+            if ai >= num_actions or ai < 0:
+                # This will raise IndexError just like original code
+                temp = np.zeros(num_actions)
+                temp[ai] = 1.0
+            # Avoid creating a temporary mixed_action array by writing
+            # directly into the output slice. This reduces allocations
+            # and improves performance for profiles with many pure actions.
+            out[start:end] = 0.0
+            out[start + int(ai)] = 1.0
         else:  # mixed action
-            mixed_action = action_profile[i]
-        out[indptr[i]:indptr[i+1]] = mixed_action
+            out[start:end] = ai
+
 
     return out
