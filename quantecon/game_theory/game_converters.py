@@ -206,11 +206,17 @@ class GAMWriter:
         s = str(g.N) + '\n'
         s += ' '.join(map(str, g.nums_actions)) + '\n\n'
 
+        payoff_arrays = []
         for i, player in enumerate(g.players):
-            payoffs = np.array2string(
+            payoff_arrays.append(
                 player.payoff_array.transpose(
                     (*range(g.N-i, g.N), *range(g.N-i))
-                ).ravel(order='F'))[1:-1]
+                ).ravel(order='F')
+            )
+
+        if payoff_arrays:
+            combined = np.concatenate(payoff_arrays)
+            payoffs = np.array2string(combined)[1:-1]
             s += ' '.join(payoffs.split()) + ' '
 
         return s.rstrip()
