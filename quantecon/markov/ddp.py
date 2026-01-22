@@ -1011,7 +1011,7 @@ class DPSolveResult(dict):
             return self.__class__.__name__ + "()"
 
     def __dir__(self):
-        return self.keys()
+        return dict.keys(self)
 
 
 def backward_induction(ddp, T, v_term=None):
