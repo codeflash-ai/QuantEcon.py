@@ -49,16 +49,33 @@ def KMR_Markov_matrix_sequential(N, p, epsilon):
     """
     P = np.zeros((N+1, N+1), dtype=float)
     P[0, 0], P[0, 1] = 1 - epsilon * (1/2), epsilon * (1/2)
-    for n in range(1, N):
-        P[n, n-1] = \
-            (n/N) * (epsilon * (1/2) +
-                     (1 - epsilon) * (((n-1)/(N-1) < p) + ((n-1)/(N-1) == p) * (1/2))
-                     )
-        P[n, n+1] = \
-            ((N-n)/N) * (epsilon * (1/2) +
-                         (1 - epsilon) * ((n/(N-1) > p) + (n/(N-1) == p) * (1/2))
-                         )
-        P[n, n] = 1 - P[n, n-1] - P[n, n+1]
+
+    # Vectorize computation for interior rows 1..N-1
+    if N > 1:
+        idx = np.arange(1, N)               # integer indices of interior rows
+        idx_f = idx.astype(float)           # float version for arithmetic
+        Nf = float(N)
+        Nm1 = float(N - 1)
+
+        half_eps = epsilon * 0.5
+        one_minus_eps = 1.0 - epsilon
+
+        frac_down = (idx_f - 1.0) / Nm1     # (n-1)/(N-1)
+        frac_up = idx_f / Nm1               # n/(N-1)
+
+        # Best-response probability pieces (keeps same float equality checks)
+        br_down = (frac_down < p).astype(float) + (frac_down == p).astype(float) * 0.5
+        br_up = (frac_up > p).astype(float) + (frac_up == p).astype(float) * 0.5
+
+        down = (idx_f / Nf) * (half_eps + one_minus_eps * br_down)
+        up = ((Nf - idx_f) / Nf) * (half_eps + one_minus_eps * br_up)
+        diag = 1.0 - down - up
+
+        rows = idx
+        P[rows, rows - 1] = down
+        P[rows, rows + 1] = up
+        P[rows, rows] = diag
+
     P[N, N-1], P[N, N] = epsilon * (1/2), 1 - epsilon * (1/2)
     return P
 
