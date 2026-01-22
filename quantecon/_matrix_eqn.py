@@ -176,15 +176,30 @@ def solve_discrete_riccati(A, B, Q, R, N=None, tolerance=1e-10, max_iter=500,
     BTA = B.T @ A
     for gamma in candidates:
         Z = R + gamma * BB
-        cn = np.linalg.cond(Z)
+        
+        # Use SVD-based condition number estimation for better performance
+        try:
+            s = np.linalg.svd(Z, compute_uv=False)
+            cn = s[0] / s[-1]
+        except np.linalg.LinAlgError:
+            cn = np.inf
+            
         if cn * EPS < 1:
             Q_tilde = - Q + (N.T @ solve(Z, N + gamma * BTA)) + gamma * I
             G0 = B @ solve(Z, B.T)
             A0 = (I - gamma * G0) @ A - (B @ solve(Z, N))
             H0 = gamma * (A.T @ A0) - Q_tilde
-            f1 = np.linalg.cond(Z, np.inf)
+            
+            # Reuse SVD from condition number check
+            f1 = cn
             f2 = gamma * f1
-            f3 = np.linalg.cond(I + (G0 @ H0))
+            
+            try:
+                s_temp = np.linalg.svd(I + (G0 @ H0), compute_uv=False)
+                f3 = s_temp[0] / s_temp[-1]
+            except np.linalg.LinAlgError:
+                f3 = np.inf
+                
             f_gamma = max(f1, f2, f3)
             if f_gamma < current_min:
                 best_gamma = gamma
