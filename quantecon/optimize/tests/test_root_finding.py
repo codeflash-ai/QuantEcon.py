@@ -23,7 +23,6 @@ def func_prime(x):
     return (3*x**2)
 
 
-@njit
 def func_prime2(x):
     """
     Second order derivative for func.
