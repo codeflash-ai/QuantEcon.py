@@ -189,12 +189,22 @@ def _lemke_howson_capping(payoff_matrices, tableaux, bases, init_pivot,
         is equivalent to the standard Lemke-Howson algorithm.
 
     """
-    m, n = tableaux[1].shape[0], tableaux[0].shape[0]
+    # Local references to avoid repeated tuple indexing
+    tableaux0 = tableaux[0]
+    tableaux1 = tableaux[1]
+    bases0 = bases[0]
+    bases1 = bases[1]
+
+    m = tableaux1.shape[0]
+    n = tableaux0.shape[0]
+    total = m + n
+
     init_pivot_curr = init_pivot
     max_iter_curr = max_iter
     total_num_iter = 0
 
-    for k in range(m+n-1):
+    # Try at most total-1 different initial pivots, then final attempt
+    for k in range(total - 1):
         capping_curr = min(max_iter_curr, capping)
 
         _initialize_tableaux(payoff_matrices, tableaux, bases)
@@ -207,8 +217,8 @@ def _lemke_howson_capping(payoff_matrices, tableaux, bases, init_pivot,
             return converged, total_num_iter, init_pivot_curr
 
         init_pivot_curr += 1
-        if init_pivot_curr >= m + n:
-            init_pivot_curr -= m + n
+        if init_pivot_curr >= total:
+            init_pivot_curr -= total
         max_iter_curr -= num_iter
 
     _initialize_tableaux(payoff_matrices, tableaux, bases)
@@ -287,29 +297,57 @@ def _initialize_tableaux(payoff_matrices, tableaux, bases):
     (array([3, 4]), array([0, 1, 2]))
 
     """
-    nums_actions = payoff_matrices[0].shape
+    # Extract matrix sizes explicitly for clarity and performance
+    A = payoff_matrices[0]
+    B = payoff_matrices[1]
+    m = A.shape[0]
+    n = A.shape[1]
 
-    consts = np.zeros(2)  # To be added to payoffs if min <= 0
-    for pl in range(2):
-        min_ = payoff_matrices[pl].min()
-        if min_ <= 0:
-            consts[pl] = min_ * (-1) + 1
+    tableaux0 = tableaux[0]
+    tableaux1 = tableaux[1]
+    bases0 = bases[0]
+    bases1 = bases[1]
 
-    for pl, (py_start, sl_start) in enumerate(zip((0, nums_actions[0]),
-                                                  (nums_actions[0], 0))):
-        for i in range(nums_actions[1-pl]):
-            for j in range(nums_actions[pl]):
-                tableaux[pl][i, py_start+j] = \
-                    payoff_matrices[1-pl][i, j] + consts[1-pl]
-            for j in range(nums_actions[1-pl]):
-                if j == i:
-                    tableaux[pl][i, sl_start+j] = 1
-                else:
-                    tableaux[pl][i, sl_start+j] = 0
-            tableaux[pl][i, -1] = 1
+    const0 = 0.0
+    const1 = 0.0
 
-        for i in range(nums_actions[1-pl]):
-            bases[pl][i] = sl_start + i
+    min0 = A.min()
+    if min0 <= 0:
+        const0 = -min0 + 1.0
+
+    min1 = B.min()
+    if min1 <= 0:
+        const1 = -min1 + 1.0
+
+    # Initialize tableaux[0]: shape (n, m+n+1)
+    # Columns 0..m-1 <- B (n x m), columns m..m+n-1 <- identity (slack), last col = 1
+    for i in range(n):
+        # Fill payoff (non-slack) columns
+        for j in range(m):
+            tableaux0[i, j] = B[i, j] + const1
+        # Fill slack identity columns
+        for j in range(n):
+            if j == i:
+                tableaux0[i, m + j] = 1.0
+            else:
+                tableaux0[i, m + j] = 0.0
+        # Basic variable value
+        tableaux0[i, -1] = 1.0
+        bases0[i] = m + i
+
+    # Initialize tableaux[1]: shape (m, m+n+1)
+    # Columns 0..m-1 <- identity (slack), columns m..m+n-1 <- A (m x n), last col = 1
+    for i in range(m):
+        for j in range(m):
+            if j == i:
+                tableaux1[i, j] = 1.0
+            else:
+                tableaux1[i, j] = 0.0
+        for j in range(n):
+            tableaux1[i, m + j] = A[i, j] + const0
+        tableaux1[i, -1] = 1.0
+        bases1[i] = i
+
 
     return tableaux, bases
 
@@ -374,15 +412,14 @@ def _lemke_howson_tbl(tableaux, bases, init_pivot, max_iter):
 
     """
     init_player = 0
-    for k in bases[0]:
-        if k == init_pivot:
+    b0 = bases[0]
+    for k in range(b0.shape[0]):
+        if b0[k] == init_pivot:
             init_player = 1
             break
-    pls = [init_player, 1 - init_player]
 
-    pivot = init_pivot
-
-    m, n = tableaux[1].shape[0], tableaux[0].shape[0]
+    m = tableaux[1].shape[0]
+    n = tableaux[0].shape[0]
     slack_starts = (m, 0)
 
     # Array to store row indices in lex_min_ratio_test
@@ -391,8 +428,18 @@ def _lemke_howson_tbl(tableaux, bases, init_pivot, max_iter):
     converged = False
     num_iter = 0
 
+    pivot = init_pivot
+
+    # Use a two-step fixed order loop instead of building a list
     while True:
-        for pl in pls:
+        # first player in sequence
+        for step in range(2):
+            if step == 0:
+                pl = init_player
+            else:
+                pl = 1 - init_player
+
+            # Determine the leaving variable
             # Determine the leaving variable
             _, row_min = _lex_min_ratio_test(tableaux[pl], pivot,
                                              slack_starts[pl], argmins)
