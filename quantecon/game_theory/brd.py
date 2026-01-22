@@ -43,8 +43,10 @@ class BRD:
             raise ValueError("length of `actions` must equal to the number of \
                               players")
         action_dist = np.zeros(self.num_actions)
-        for i in range(self.N):
-            action_dist[actions[i]] += 1
+        counts = np.bincount(np.asarray(actions, dtype=np.intp),
+                             minlength=self.num_actions)
+        # Ensure we only assign as many entries as counts provides
+        action_dist[:counts.shape[0]] = counts
         return action_dist
 
     def play(self, action, action_dist, **options):
@@ -111,18 +113,29 @@ class BRD:
             init_action_dist = self._set_action_dist(init_actions)
 
         out = np.empty((ts_length, self.num_actions), dtype=int)
-        random_state = check_random_state(random_state)
         player_ind_seq = rng_integers(random_state, self.N, size=ts_length)
         action_dist = np.asarray(init_action_dist)
+
+        cum = action_dist.cumsum()
+
         for t in range(ts_length):
-            out[t, :] = action_dist[:]
-            action = np.searchsorted(action_dist.cumsum(), player_ind_seq[t],
-                                     side='right')
-            random_state = check_random_state(random_state)
-            action_dist = self.play(action, action_dist,
-                                    tol=tol,
-                                    tie_breaking=tie_breaking,
-                                    random_state=random_state)
+            out[t, :] = action_dist
+            idx = player_ind_seq[t]
+            action = np.searchsorted(cum, idx, side='right')
+
+            action_dist[action] -= 1
+            next_action = self.player.best_response(action_dist,
+                                                    tol=tol,
+                                                    tie_breaking=tie_breaking,
+                                                    random_state=random_state)
+            action_dist[next_action] += 1
+
+            if action != next_action:
+                if action < next_action:
+                    cum[action:next_action] -= 1
+                else:
+                    cum[next_action:action] += 1
+
         return out
 
 
