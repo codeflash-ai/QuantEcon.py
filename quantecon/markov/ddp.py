@@ -370,7 +370,8 @@ class DiscreteDP:
             def s_wise_max(vals, out=None, out_argmax=None):
                 """
                 Return the vector max_a vals(s, a), where vals is represented
-                by a 1-dimensional ndarray of shape (self.num_sa_pairs,).
+                by a 2-dimensional ndarray of shape (n, m). Stored in out,
+                which must be of length self.num_states.
                 out and out_argmax must be of length self.num_states; dtype of
                 out_argmax must be int.
 
@@ -442,6 +443,10 @@ class DiscreteDP:
         else:
             self._lineq_solve = np.linalg.solve
             self._I = np.identity(self.num_states)
+
+
+        # Cache for RQ_sigma results - stores (R_sigma, Q_sigma) for last policy
+        self._rq_cache = {}
 
     def _check_action_feasibility(self):
         """
@@ -656,13 +661,22 @@ class DiscreteDP:
         if self.beta == 1:
             raise NotImplementedError(self._error_msg_no_discounting)
 
+        # Cache key based on policy content
+        cache_key = sigma.tobytes()
+        
+        if cache_key in self._rq_cache:
+            R_sigma, Q_sigma = self._rq_cache[cache_key]
+        else:
+            R_sigma, Q_sigma = self.RQ_sigma(sigma)
+            # Only cache if policy is stable (will be reused)
+            self._rq_cache.clear()
+            self._rq_cache[cache_key] = (R_sigma, Q_sigma)
+
         # Solve (I - beta * Q_sigma) v = R_sigma for v
-        R_sigma, Q_sigma = self.RQ_sigma(sigma)
-        b = R_sigma
 
         A = self._I - self.beta * Q_sigma
+        v_sigma = self._lineq_solve(A, R_sigma)
 
-        v_sigma = self._lineq_solve(A, b)
 
         return v_sigma
 
@@ -829,8 +843,13 @@ class DiscreteDP:
         if v_init is None:
             v_init = self.s_wise_max(self.R)
 
-        sigma = self.compute_greedy(v_init)
+        # Pre-allocate arrays for reuse
+        sigma = np.empty(self.num_states, dtype=int)
         new_sigma = np.empty(self.num_states, dtype=int)
+
+        
+        # Initial greedy policy
+        self.compute_greedy(v_init, sigma=sigma)
 
         for i in range(max_iter):
             # Policy evaluation
@@ -839,7 +858,10 @@ class DiscreteDP:
             self.compute_greedy(v_sigma, sigma=new_sigma)
             if np.array_equal(new_sigma, sigma):
                 break
-            sigma[:] = new_sigma
+            
+            # Swap arrays instead of copying
+            sigma, new_sigma = new_sigma, sigma
+
 
         num_iter = i + 1
 
@@ -960,7 +982,13 @@ class DiscreteDP:
             Controlled Markov chain.
 
         """
-        _, Q_sigma = self.RQ_sigma(sigma)
+        # Reuse cached RQ_sigma if available
+        cache_key = np.asarray(sigma).tobytes()
+        if cache_key in self._rq_cache:
+            _, Q_sigma = self._rq_cache[cache_key]
+        else:
+            _, Q_sigma = self.RQ_sigma(sigma)
+        
         return MarkovChain(Q_sigma)
 
 
