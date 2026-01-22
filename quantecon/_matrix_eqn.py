@@ -19,7 +19,7 @@ EPS = np.finfo(float).eps
 
 
 def solve_discrete_lyapunov(A, B, max_it=50, method="doubling"):
-    r"""
+    """
     Computes the solution to the discrete lyapunov equation
 
     .. math::
@@ -75,7 +75,7 @@ def solve_discrete_lyapunov(A, B, max_it=50, method="doubling"):
             alpha1 = alpha0 @ alpha0
             gamma1 = gamma0 + (alpha0 @ gamma0 @ alpha0.conjugate().T)
 
-            diff = np.max(np.abs(gamma1 - gamma0))
+            diff = np.abs(gamma1 - gamma0).max()
             alpha0 = alpha1
             gamma0 = gamma1
 
