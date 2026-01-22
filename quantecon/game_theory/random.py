@@ -175,7 +175,7 @@ def random_pure_actions(nums_actions, random_state=None):
     """
     random_state = check_random_state(random_state)
     action_profile = tuple(
-        [rng_integers(random_state, num_actions) for num_actions in nums_actions]
+        rng_integers(random_state, num_actions) for num_actions in nums_actions
     )
     return action_profile
 
