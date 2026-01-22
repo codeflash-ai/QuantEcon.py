@@ -6,6 +6,8 @@ import time
 import numpy as np
 from ..timings.timings import get_default_precision
 
+_time = time.time
+
 
 class __Timer__:
     """Computes elapsed time, between tic, tac, and toc.
@@ -36,9 +38,8 @@ class __Timer__:
         None
             This function doesn't return a value.
         """
-        t = time.time()
-        self.start = t
-        self.last = t
+        t = _time()
+        self.start = self.last = t
 
     def tac(self, verbose=True, digits=2):
         """
