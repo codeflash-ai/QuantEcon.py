@@ -55,12 +55,14 @@ class LogitDynamics:
             player.logit_choice_cdfs = \
                 np.exp(payoff_array_rotated*self.beta).cumsum(axis=-1)
 
+        self._cached_logit_choice_cdfs = tuple(player.logit_choice_cdfs for player in self.players)
+
     def logit_choice_cdfs(self):
         """
         Return the tuple of choice probabilities.
 
         """
-        return tuple(player.logit_choice_cdfs for player in self.players)
+        return self._cached_logit_choice_cdfs
 
     def _play(self, player_ind, actions, random_state):
         i = player_ind
