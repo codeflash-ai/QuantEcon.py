@@ -90,9 +90,32 @@ def _s_wise_max(a_indices, a_indptr, vals, out_max):
 def _find_indices(a_indices, a_indptr, sigma, out):
     n = len(sigma)
     for i in range(n):
-        for j in range(a_indptr[i], a_indptr[i+1]):
-            if sigma[i] == a_indices[j]:
-                out[i] = j
+        # Use binary search when possible because a_indices within each
+        # state's block are typically sorted; fall back to linear scan if
+        # binary search fails to preserve behavior in edge cases.
+        lo = a_indptr[i]
+        hi = a_indptr[i+1] - 1
+        target = sigma[i]
+        found = False
+        # Binary search
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            mid_val = a_indices[mid]
+            if mid_val == target:
+                out[i] = mid
+                found = True
+                break
+            elif mid_val < target:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        if not found:
+            # Fallback to linear scan to preserve original behavior in
+            # cases where the per-state block is not sorted.
+            for j in range(a_indptr[i], a_indptr[i+1]):
+                if sigma[i] == a_indices[j]:
+                    out[i] = j
+                    break
 
 
 @jit(nopython=True, cache=True)
