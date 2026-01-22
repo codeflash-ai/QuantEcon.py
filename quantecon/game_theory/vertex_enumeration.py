@@ -356,18 +356,46 @@ def _get_mixed_actions(labeling_bits, equation_tup, trans_recips):
     m, n = equation_tup[0].shape[0] - 1, equation_tup[1].shape[0] - 1
     out = np.empty(m+n)
 
-    for pl, (start, stop, skip) in enumerate([(0, m, np.uint64(1)),
-                                              (m, m+n, np.uint64(0))]):
-        sum_ = 0.
-        for i in range(start, stop):
-            if (labeling_bits & np.uint64(1)) == skip:
-                out[i] = 0
-            else:
-                out[i] = equation_tup[pl][i-start] * trans_recips[pl] - \
-                    equation_tup[pl][-1]
-                sum_ += out[i]
-            labeling_bits = labeling_bits >> np.uint64(1)
-        if sum_ != 0:
-            out[start:stop] /= sum_
+    # Localize frequently used values to reduce indexing overhead
+    eq0 = equation_tup[0]
+    eq1 = equation_tup[1]
+    tr0 = trans_recips[0]
+    tr1 = trans_recips[1]
+    last0 = eq0[-1]
+    last1 = eq1[-1]
+
+    lb = labeling_bits
+    mask = np.uint64(1)
+
+    # First player block (pl = 0)
+    sum_ = 0.0
+    for i in range(0, m):
+        if (lb & mask) == np.uint64(1):
+            out[i] = 0.0
+        else:
+            val = eq0[i] * tr0 - last0
+            out[i] = val
+            sum_ += val
+        lb = lb >> mask
+    if sum_ != 0.0:
+        inv = 1.0 / sum_
+        for i in range(0, m):
+            out[i] *= inv
+
+    # Second player block (pl = 1)
+    sum_ = 0.0
+    for i in range(m, m + n):
+        if (lb & mask) == np.uint64(0):
+            out[i] = 0.0
+        else:
+            idx = i - m
+            val = eq1[idx] * tr1 - last1
+            out[i] = val
+            sum_ += val
+        lb = lb >> mask
+    if sum_ != 0.0:
+        inv = 1.0 / sum_
+        for i in range(m, m + n):
+            out[i] *= inv
 
     return out[:m], out[m:]
