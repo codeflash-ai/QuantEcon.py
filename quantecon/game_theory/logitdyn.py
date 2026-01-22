@@ -48,12 +48,12 @@ class LogitDynamics:
         self.beta = beta
 
         for player in self.players:
-            payoff_array_rotated = \
-                player.payoff_array.transpose((*range(1, self.N), 0))
-            payoff_array_rotated -= \
-                payoff_array_rotated.max(axis=-1)[..., np.newaxis]
+            # Move axis 0 to last axis; using moveaxis + keepdims reduces temporaries
+            payoff_array_rotated = np.moveaxis(player.payoff_array, 0, -1)
+            # Subtract max along last axis with keepdims to broadcast correctly
+            payoff_array_rotated -= payoff_array_rotated.max(axis=-1, keepdims=True)
             player.logit_choice_cdfs = \
-                np.exp(payoff_array_rotated*self.beta).cumsum(axis=-1)
+                np.exp(payoff_array_rotated * self.beta).cumsum(axis=-1)
 
     def logit_choice_cdfs(self):
         """
@@ -71,7 +71,8 @@ class LogitDynamics:
 
         cdf = self.players[i].logit_choice_cdfs[opponent_actions]
         random_value = random_state.random()
-        next_action = cdf.searchsorted(random_value*cdf[-1], side='right')
+        next_action = cdf.searchsorted(random_value * cdf[-1], side='right')
+
 
         return next_action
 
@@ -143,18 +144,18 @@ class LogitDynamics:
             The array representing the time series of action profiles.
 
         """
+        # Resolve random_state once to avoid redundant checks in the loop
+        random_state = check_random_state(random_state)
+
         if init_actions is None:
-            random_state = check_random_state(random_state)
             init_actions = random_pure_actions(self.nums_actions, random_state)
         actions = list(init_actions)
 
         out = np.empty((ts_length, self.N), dtype=int)
-        random_state = check_random_state(random_state)
         player_ind_seq = rng_integers(random_state, self.N, size=ts_length)
 
         for t, player_ind in enumerate(player_ind_seq):
-            out[t, :] = actions[:]
-            random_state = check_random_state(random_state)
+            out[t, :] = actions
             actions[player_ind] = self._play(player_ind, actions, random_state)
 
         return out
