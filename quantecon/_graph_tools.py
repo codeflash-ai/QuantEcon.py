@@ -191,10 +191,28 @@ class DiGraph:
         )
 
         scc_proj = self.scc_proj
-        for node_from, node_to in _csr_matrix_indices(self.csgraph):
-            scc_from, scc_to = scc_proj[node_from], scc_proj[node_to]
-            if scc_from != scc_to:
-                condensation_lil[scc_from, scc_to] = True
+        
+        # Get row indices by repeating each row index based on the number of entries
+        row_indices = np.repeat(np.arange(self.csgraph.shape[0]), 
+                                np.diff(self.csgraph.indptr))
+        col_indices = self.csgraph.indices
+        
+        # Map original nodes to their SCC labels
+        scc_from = scc_proj[row_indices]
+        scc_to = scc_proj[col_indices]
+        
+        # Filter out edges within the same SCC
+        mask = scc_from != scc_to
+        scc_from_filtered = scc_from[mask]
+        scc_to_filtered = scc_to[mask]
+        
+        # Set condensation edges (unique pairs only)
+        if len(scc_from_filtered) > 0:
+            # Stack and get unique edges
+            edges = np.column_stack((scc_from_filtered, scc_to_filtered))
+            unique_edges = np.unique(edges, axis=0)
+            condensation_lil[unique_edges[:, 0], unique_edges[:, 1]] = True
+
 
         return condensation_lil
 
