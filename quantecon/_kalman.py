@@ -81,12 +81,11 @@ class Kalman:
         return self.__str__()
 
     def __str__(self):
-        m = """\
-        Kalman filter:
-          - dimension of state space          : {n}
-          - dimension of observation equation : {k}
-        """
-        return dedent(m.format(n=self.ss.n, k=self.ss.k))
+        return (
+            "Kalman filter:\n"
+            f"  - dimension of state space          : {self.ss.n}\n"
+            f"  - dimension of observation equation : {self.ss.k}\n"
+        )
 
     @property
     def Sigma_infinity(self):
