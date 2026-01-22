@@ -178,9 +178,15 @@ def solve_discrete_riccati(A, B, Q, R, N=None, tolerance=1e-10, max_iter=500,
         Z = R + gamma * BB
         cn = np.linalg.cond(Z)
         if cn * EPS < 1:
-            Q_tilde = - Q + (N.T @ solve(Z, N + gamma * BTA)) + gamma * I
-            G0 = B @ solve(Z, B.T)
-            A0 = (I - gamma * G0) @ A - (B @ solve(Z, N))
+            rhs_stacked = np.concatenate((N + gamma * BTA, B.T, N), axis=1)
+            sol = solve(Z, rhs_stacked)
+            sol1 = sol[:, :k]
+            sol2 = sol[:, k:2*k]
+            sol3 = sol[:, 2*k:]
+
+            Q_tilde = - Q + (N.T @ sol1) + gamma * I
+            G0 = B @ sol2
+            A0 = (I - gamma * G0) @ A - (B @ sol3)
             H0 = gamma * (A.T @ A0) - Q_tilde
             f1 = np.linalg.cond(Z, np.inf)
             f2 = gamma * f1
@@ -199,9 +205,15 @@ def solve_discrete_riccati(A, B, Q, R, N=None, tolerance=1e-10, max_iter=500,
     R_hat = R + gamma * BB
 
     # == Initial conditions == #
-    Q_tilde = - Q + (N.T @ solve(R_hat, N + gamma * BTA)) + gamma * I
-    G0 = B @ solve(R_hat, B.T)
-    A0 = (I - gamma * G0) @ A - (B @ solve(R_hat, N))
+    rhs_stacked = np.concatenate((N + gamma * BTA, B.T, N), axis=1)
+    sol = solve(R_hat, rhs_stacked)
+    sol1 = sol[:, :k]
+    sol2 = sol[:, k:2*k]
+    sol3 = sol[:, 2*k:]
+
+    Q_tilde = - Q + (N.T @ sol1) + gamma * I
+    G0 = B @ sol2
+    A0 = (I - gamma * G0) @ A - (B @ sol3)
     H0 = gamma * (A.T @ A0) - Q_tilde
     i = 1
 
@@ -212,9 +224,16 @@ def solve_discrete_riccati(A, B, Q, R, N=None, tolerance=1e-10, max_iter=500,
             raise ValueError(fail_msg.format(i))
 
         else:
-            A1 = A0 @ solve(I + (G0 @ H0), A0)
-            G1 = G0 + ((A0 @ G0) @ solve(I + (H0 @ G0), A0.T))
-            H1 = H0 + (A0.T @ solve(I + (H0 @ G0), (H0 @ A0)))
+            C1 = I + (G0 @ H0)
+            C2 = I + (H0 @ G0)
+
+            A1 = A0 @ solve(C1, A0)
+            
+            rhs_c2 = np.concatenate((A0.T, H0 @ A0), axis=1)
+            sol_c2 = solve(C2, rhs_c2)
+            
+            G1 = G0 + ((A0 @ G0) @ sol_c2[:, :k])
+            H1 = H0 + (A0.T @ sol_c2[:, k:])
 
             error = np.max(np.abs(H1 - H0))
             A0 = A1
