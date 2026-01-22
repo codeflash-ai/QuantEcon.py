@@ -47,9 +47,11 @@ class LogitDynamics:
 
         self.beta = beta
 
+
+        axes = (*range(1, self.N), 0)
         for player in self.players:
             payoff_array_rotated = \
-                player.payoff_array.transpose((*range(1, self.N), 0))
+                player.payoff_array.transpose(axes)
             payoff_array_rotated -= \
                 payoff_array_rotated.max(axis=-1)[..., np.newaxis]
             player.logit_choice_cdfs = \
@@ -108,14 +110,12 @@ class LogitDynamics:
         init_actions = list(init_actions)
 
         if player_ind_seq is None:
-            random_state = check_random_state(random_state)
             player_ind_seq = rng_integers(random_state, self.N, size=num_reps)
 
         if isinstance(player_ind_seq, numbers.Integral):
             player_ind_seq = [player_ind_seq]
 
-        for t, player_ind in enumerate(player_ind_seq):
-            random_state = check_random_state(random_state)
+        for player_ind in player_ind_seq:
             init_actions[player_ind] = self._play(player_ind, init_actions,
                                                   random_state)
 
