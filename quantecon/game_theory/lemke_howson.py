@@ -444,15 +444,36 @@ def _get_mixed_actions(tableaux, bases):
     num = nums_actions[0] + nums_actions[1]
     out = np.zeros(num)
 
-    for pl, (start, stop) in enumerate(zip((0, nums_actions[0]),
-                                           (nums_actions[0], num))):
-        sum_ = 0.
-        for i in range(nums_actions[1-pl]):
-            k = bases[pl][i]
-            if start <= k < stop:
-                out[k] = tableaux[pl][i, -1]
-                sum_ += tableaux[pl][i, -1]
-        if sum_ != 0:
-            out[start:stop] /= sum_
+    # Player 0
+    start0, stop0 = 0, nums_actions[0]
+    tableau0 = tableaux[0]
+    bases0 = bases[0]
+    sum0 = 0.
+    for i in range(nums_actions[1]):
+        k = bases0[i]
+        if start0 <= k < stop0:
+            val = tableau0[i, -1]
+            out[k] = val
+            sum0 += val
+    if sum0 != 0:
+        inv_sum0 = 1.0 / sum0
+        for k in range(start0, stop0):
+            out[k] *= inv_sum0
+
+    # Player 1
+    start1, stop1 = nums_actions[0], num
+    tableau1 = tableaux[1]
+    bases1 = bases[1]
+    sum1 = 0.
+    for i in range(nums_actions[0]):
+        k = bases1[i]
+        if start1 <= k < stop1:
+            val = tableau1[i, -1]
+            out[k] = val
+            sum1 += val
+    if sum1 != 0:
+        inv_sum1 = 1.0 / sum1
+        for k in range(start1, stop1):
+            out[k] *= inv_sum1
 
     return out[:nums_actions[0]], out[nums_actions[0]:]
