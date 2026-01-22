@@ -141,12 +141,13 @@ def random_polymatrix_game(nums_actions, random_state=None):
     N = len(nums_actions)
     if N == 0:
         raise ValueError('nums_actions must be non-empty')
-    pairs = np.where(np.arange(N)[:, np.newaxis] != np.arange(N))
 
     random_state = check_random_state(random_state)
     polymatrix = {
         (i, j): random_state.random((nums_actions[i], nums_actions[j]))
-        for i, j in zip(*pairs)
+        for i in range(N)
+        for j in range(N)
+        if i != j
     }
 
     return PolymatrixGame(polymatrix)
