@@ -122,7 +122,11 @@ def lemke_howson(g, init_pivot=0, max_iter=10**6, capping=None,
 
     payoff_matrices = g.payoff_arrays
     nums_actions = g.nums_actions
-    total_num = sum(nums_actions)
+
+    # Unpack actions to avoid repeated indexing/sum overhead
+    m, n = nums_actions[0], nums_actions[1]
+    total_num = m + n
+
 
     msg = f'`init_pivot` must be an integer k such that 0 <= k < {total_num}'
 
@@ -135,10 +139,11 @@ def lemke_howson(g, init_pivot=0, max_iter=10**6, capping=None,
     if capping is None:
         capping = max_iter
 
-    tableaux = tuple(
-        np.empty((nums_actions[1-i], total_num+1)) for i in range(N)
-    )
-    bases = tuple(np.empty(nums_actions[1-i], dtype=int) for i in range(N))
+    # Directly allocate the two tableaux and two bases arrays using the
+    # known shapes for 2-player games to reduce comprehension overhead.
+    tableaux = (np.empty((n, total_num + 1)), np.empty((m, total_num + 1)))
+    bases = (np.empty(n, dtype=int), np.empty(m, dtype=int))
+
 
     converged, num_iter, init_pivot_used = \
         _lemke_howson_capping(payoff_matrices, tableaux, bases, init_pivot,
