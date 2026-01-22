@@ -105,7 +105,7 @@ class DiGraph:
             dtype = None
         else:
             dtype = bool
-        self.csgraph = sparse.csr_matrix(adj_matrix, dtype=dtype)
+        self.csgraph = sparse.csr_matrix(adj_matrix, dtype=dtype, copy=False)
 
         m, n = self.csgraph.shape
         if n != m:
@@ -347,7 +347,8 @@ class DiGraph:
             A DiGraph representing the subgraph.
 
         """
-        adj_matrix = self.csgraph[np.ix_(nodes, nodes)]
+        nodes = np.asarray(nodes)
+        adj_matrix = self.csgraph[nodes][:, nodes]
 
         weighted = True  # To copy the dtype
 
