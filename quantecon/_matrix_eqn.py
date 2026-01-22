@@ -282,6 +282,14 @@ def solve_discrete_riccati_system(Π, As, Bs, Cs, Qs, Rs, Ns, beta,
     fail_msg = "Convergence failed after {} iterations."
 
     # == Prepare array for iteration == #
+
+    # Precompute transposes that are reused
+    As_T = [A.T for A in As]
+    Bs_T = [B.T for B in Bs]
+    # Ns may be None in API, but original implementation expects indexing; keep same usage
+    Ns_T = [N.T for N in Ns] if Ns is not None else None
+
+    # == Prepare array for iteration == #
     sum1, sum2 = np.empty((n, n)), np.empty((n, n))
 
     # == Main loop == #
@@ -295,19 +303,52 @@ def solve_discrete_riccati_system(Π, As, Bs, Cs, Qs, Rs, Ns, beta,
             error = 0
             for i in range(m):
                 # Initialize arrays
-                sum1[:, :] = 0.
-                sum2[:, :] = 0.
-                for j in range(m):
-                    sum1 += beta * Π[i, j] * As[i].T @ Ps[j] @ As[i]
-                    sum2 += Π[i, j] * \
-                            (beta * As[i].T @ Ps[j] @ Bs[i] + Ns[i].T) @ \
-                            solve(Qs[i] + beta * Bs[i].T @ Ps[j] @ Bs[i],
-                                  beta * Bs[i].T @ Ps[j] @ As[i] + Ns[i])
+                sum1.fill(0.)
+                sum2.fill(0.)
 
-                Ps1[i][:, :] = Rs[i] + sum1 - sum2
+                As_i = As[i]
+                Bs_i = Bs[i]
+                As_i_T = As_T[i]
+                Bs_i_T = Bs_T[i]
+                Qs_i = Qs[i]
+                Rs_i = Rs[i]
+                Ns_i = Ns[i]
+                Ns_i_T = Ns_T[i] if Ns_T is not None else None
+                Pi_row = Π[i]
+
+                # Loop over j, using precomputed Ps[j] @ A and Ps[j] @ B to reduce multiplies
+                for j in range(m):
+                    Pi_ij = Pi_row[j]
+                    Ps_j = Ps[j]
+
+                    # Compute Ps_j @ As_i and Ps_j @ Bs_i once and reuse
+                    PtA = Ps_j @ As_i       # n x n
+                    PtB = Ps_j @ Bs_i       # n x k
+
+                    # sum1 contribution: beta * Π[i,j] * As_i.T @ Ps_j @ As_i
+                    sum1 += beta * Pi_ij * (As_i_T @ PtA)
+
+                    # Prepare matrices for solve and multiplication
+                    # K = Qs_i + beta * Bs_i.T @ Ps_j @ Bs_i
+                    K = Qs_i + beta * (Bs_i_T @ PtB)
+
+                    # RHS for solve: beta * Bs_i.T @ Ps_j @ As_i + Ns_i
+                    RHS = beta * (Bs_i_T @ PtA) + Ns_i
+
+                    # Solve K X = RHS  -> X is k x n
+                    X = solve(K, RHS)
+
+                    # Left multiplier: (beta * As_i.T @ Ps_j @ Bs_i + Ns_i.T) -> n x k
+                    left = beta * (As_i_T @ PtB) + Ns_i_T
+
+                    # sum2 contribution
+                    sum2 += Pi_ij * (left @ X)
+
+                Ps1[i][:, :] = Rs_i + sum1 - sum2
                 error += np.max(np.abs(Ps1[i] - Ps[i]))
 
-            Ps[:, :, :] = Ps1[:, :, :]
+            # Swap buffers instead of copying to reduce memory traffic
+            Ps, Ps1 = Ps1, Ps
             iteration += 1
 
     return Ps
