@@ -5,7 +5,6 @@ Tools for dealing with a directed graph.
 import numpy as np
 from scipy import sparse
 from scipy.sparse import csgraph
-from math import gcd
 from numba import jit
 
 from .util import check_random_state
@@ -296,14 +295,18 @@ class DiGraph:
             level[node_order[i]] = level[predecessors[node_order[i]]] + 1
 
         # Determine the period
-        d = 0
-        for node_from, node_to in _csr_matrix_indices(non_bfs_tree_csr):
-            value = level[node_from] - level[node_to] + 1
-            d = gcd(d, value)
-            if d == 1:
-                self._period = 1
-                self._cyclic_components_proj = np.zeros(self.n, dtype=int)
-                return None
+        rows, cols = non_bfs_tree_csr.nonzero()
+        if rows.size == 0:
+            d = 0
+        else:
+            values = level[rows] - level[cols] + 1
+            d = int(np.gcd.reduce(values))
+
+        if d == 1:
+            self._period = 1
+            self._cyclic_components_proj = np.zeros(self.n, dtype=int)
+            return None
+
 
         self._period = d
         self._cyclic_components_proj = level % d
