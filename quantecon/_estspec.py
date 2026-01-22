@@ -2,8 +2,18 @@
 Functions for working with periodograms of scalar data.
 
 """
+from functools import lru_cache
+
 import numpy as np
 from numpy.fft import fft
+
+_WINDOWS = {
+    'hanning': np.hanning,
+    'hamming': np.hamming,
+    'bartlett': np.bartlett,
+    'blackman': np.blackman,
+    'flat': np.ones,  # moving average
+}
 
 
 def smooth(x, window_len=7, window='hanning'):
@@ -43,13 +53,6 @@ def smooth(x, window_len=7, window='hanning'):
         window_len += 1
         print("Window length reset to {}".format(window_len))
 
-    windows = {'hanning': np.hanning,
-               'hamming': np.hamming,
-               'bartlett': np.bartlett,
-               'blackman': np.blackman,
-               'flat': np.ones  # moving average
-               }
-
     # === Reflect x around x[0] and x[-1] prior to convolution === #
     k = int(window_len / 2)
     xb = x[:k]   # First k elements
@@ -57,12 +60,12 @@ def smooth(x, window_len=7, window='hanning'):
     s = np.concatenate((xb[::-1], x, xt[::-1]))
 
     # === Select window values === #
-    if window in windows.keys():
-        w = windows[window](window_len)
+    if window in _WINDOWS.keys():
+        w = _cached_window(window, window_len)
     else:
         msg = "Unrecognized window type '{}'".format(window)
         print(msg + " Defaulting to hanning")
-        w = windows['hanning'](window_len)
+        w = _cached_window('hanning', window_len)
 
     return np.convolve(w / w.sum(), s, mode='valid')
 
@@ -150,3 +153,11 @@ def ar_periodogram(x, window='hanning', window_len=7):
     I_w = I_w / np.abs(1 - phi * np.exp(1j * w))**2
 
     return w, I_w
+
+# Cache generated windows; caching only the recognized window generation
+# avoids recomputing the same kernel repeatedly across calls.
+@lru_cache(maxsize=64)
+def _cached_window(window: str, window_len: int) -> np.ndarray:
+    # _WINDOWS is looked up by the caller to guarantee window exists;
+    # this helper assumes the window key is valid.
+    return _WINDOWS[window](window_len)
