@@ -430,6 +430,9 @@ class DiscreteDP:
             warnings.warn(msg)
             self._error_msg_no_discounting = 'method invalid for beta=1'
         self.beta = beta
+        
+        # Pre-compute beta * Q for performance optimization
+        self._beta_Q = beta * self.Q if beta != 1.0 else None
 
         self.epsilon = 1e-3
         self.max_iter = 250
@@ -590,7 +593,11 @@ class DiscreteDP:
             Updated value function vector, of length n.
 
         """
-        vals = self.R + self.beta * (self.Q @ v)  # Shape: (L,) or (n, m)
+        if self._beta_Q is not None:
+            vals = self.R + self._beta_Q @ v  # Shape: (L,) or (n, m)
+        else:
+            vals = self.R + self.beta * (self.Q @ v)  # Shape: (L,) or (n, m)
+
 
         if Tv is None:
             Tv = np.empty(self.num_states)
