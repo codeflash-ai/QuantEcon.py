@@ -296,7 +296,7 @@ class DiscreteDP:
     4
 
     """
-    def __init__(self, R, Q, beta, s_indices=None, a_indices=None):
+    def __init__(self, R, Q, beta, s_indices=None, a_indices=None, _skip_feasibility_check=False):
         self._sa_pair = False
         self._sparse = False
 
@@ -350,7 +350,7 @@ class DiscreteDP:
             else:
                 # Sort indices and elements of R and Q
                 sa_ptrs = sp.coo_matrix(
-                    (np.arange(self.num_sa_pairs), (s_indices, a_indices))
+                    (np.arange(self.num_sa_pairs), (self.s_indices, self.a_indices))
                 ).tocsr()
                 sa_ptrs.sort_indices()
                 self.a_indices = sa_ptrs.indices
@@ -421,7 +421,9 @@ class DiscreteDP:
             self.s_wise_max = s_wise_max
 
         # Check that for every state, at least one action is feasible
-        self._check_action_feasibility()
+        if not _skip_feasibility_check:
+            self._check_action_feasibility()
+
 
         if not (0 <= beta <= 1):
             raise ValueError('beta must be in [0, 1]')
@@ -495,13 +497,15 @@ class DiscreteDP:
         if self._sa_pair:
             return self
         else:
-            s_ind, a_ind = np.where(self.R > - np.inf)
-            RL = self.R[s_ind, a_ind]
+            # Create boolean mask once
+            mask = self.R > -np.inf
+            s_ind, a_ind = np.where(mask)
+            RL = self.R[mask]
             if sparse:
                 QL = sp.csr_matrix(self.Q[s_ind, a_ind])
             else:
                 QL = self.Q[s_ind, a_ind]
-            return DiscreteDP(RL, QL, self.beta, s_ind, a_ind)
+            return DiscreteDP(RL, QL, self.beta, s_ind, a_ind, _skip_feasibility_check=True)
 
     def to_product_form(self):
         """
