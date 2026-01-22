@@ -4,7 +4,7 @@ Lemke-Howson Algorithm routines.
 
 """
 import numpy as np
-from numba import jit
+from numba import njit, jit
 
 
 TOL_PIV = 1e-10
