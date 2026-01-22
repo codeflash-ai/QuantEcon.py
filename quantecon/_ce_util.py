@@ -113,11 +113,21 @@ def _gridmake2(x1, x2):
 
     """
     if x1.ndim == 1 and x2.ndim == 1:
-        return np.column_stack([np.tile(x1, x2.shape[0]),
-                               np.repeat(x2, x1.shape[0])])
+        n1 = x1.shape[0]
+        n2 = x2.shape[0]
+        # Preallocate output with the promoted dtype to avoid extra temporaries
+        out = np.empty((n1 * n2, 2), dtype=np.result_type(x1, x2))
+        out[:, 0] = np.tile(x1, n2)
+        out[:, 1] = np.repeat(x2, n1)
+        return out
     elif x1.ndim > 1 and x2.ndim == 1:
-        first = np.tile(x1, (x2.shape[0], 1))
-        second = np.repeat(x2, x1.shape[0])
-        return np.column_stack([first, second])
+        n1 = x1.shape[0]
+        n2 = x2.shape[0]
+        m = x1.shape[1]
+        out = np.empty((n1 * n2, m + 1), dtype=np.result_type(x1, x2))
+        # tile once and assign into the preallocated output to avoid an extra hstack/column_stack
+        out[:, :m] = np.tile(x1, (n2, 1))
+        out[:, m] = np.repeat(x2, n1)
+        return out
     else:
         raise NotImplementedError("Come back here")
