@@ -42,14 +42,17 @@ def hamilton_filter(data, h, p=None):
 
     if p is not None:  # if p is supplied
         # construct X matrix of lags
-        X = np.ones((T-p-h+1, p+1))
+        X = np.empty((T-p-h+1, p+1))
+        X[:, 0] = 1.0
         for j in range(1, p+1):
             X[:, j] = y[p-j:T-h-j+1:1]
 
         # do OLS regression
         b = np.linalg.solve(X.transpose()@X, X.transpose()@y[p+h-1:T])
         # trend component (`nan` for the first p+h-1 period)
-        trend = np.append(np.zeros(p+h-1)+np.nan, X@b)
+        trend = np.empty(T)
+        trend[:p+h-1] = np.nan
+        trend[p+h-1:] = X@b
         # cyclical component
         cycle = y - trend
     else:  # if p is not supplied (random walk)
