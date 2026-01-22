@@ -64,6 +64,23 @@ def pure_nash_brute_gen(g, tol=None):
         Tuple of Nash equilibrium pure actions.
 
     """
+    payoff_profile_array = g.payoff_profile_array
+    N = g.N
+    
+    # Pre-compute tolerances for each player
+    if tol is not None:
+        tolerances = [tol] * N
+    else:
+        tolerances = [player.tol for player in g.players]
+
     for a in np.ndindex(*g.nums_actions):
-        if g.is_nash(a, tol=tol):
+        is_nash = True
+        for i in range(N):
+            idx = a[:i] + (slice(None),) + a[i+1:]
+            payoffs = payoff_profile_array[idx + (i,)]
+            if payoffs[a[i]] + tolerances[i] < payoffs.max():
+                is_nash = False
+                break
+        
+        if is_nash:
             yield a
