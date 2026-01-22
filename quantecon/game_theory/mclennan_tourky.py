@@ -255,7 +255,17 @@ def _get_action_profile(x, indptr):
 
     """
     N = len(indptr) - 1
-    action_profile = tuple(x[indptr[i]:indptr[i+1]] for i in range(N))
+    if N <= 0:
+        return tuple()
+    # Use an iterator over indptr to avoid repeated indexing and create slices
+    res = [None] * N
+    it = iter(indptr)
+    start = next(it)
+    for i in range(N):
+        end = next(it)
+        res[i] = x[start:end]
+        start = end
+    action_profile = tuple(res)
     return action_profile
 
 
