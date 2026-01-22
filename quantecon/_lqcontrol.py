@@ -523,20 +523,36 @@ class LQMarkov:
         Fs = np.array([np.empty((k, n)) for i in range(m)])
         X = np.empty((m, m))
         sum1, sum2 = np.empty((k, k)), np.empty((k, n))
+        
+        # Pre-compute transposes
+        Bs_T = np.array([B.T for B in Bs])
+        
         for i in range(m):
             # CCi = C_i C_i'
-            CCi = Cs[i] @ Cs[i].T
-            sum1[:, :] = 0.
-            sum2[:, :] = 0.
+            Ci = Cs[i]
+            CCi = Ci @ Ci.T
+            sum1.fill(0.)
+            sum2.fill(0.)
+            
+            Bi_T = Bs_T[i]
+            Qi = Qs[i]
+            
             for j in range(m):
+                beta_Πij = beta * Π[i, j]
+                Pj = Ps[j]
+                
+                # Compute Bi_T @ Pj once
+                BiTPj = Bi_T @ Pj
+                
                 # for F
-                sum1 += beta * Π[i, j] * Bs[i].T @ Ps[j] @ Bs[i]
-                sum2 += beta * Π[i, j] * Bs[i].T @ Ps[j] @ As[i]
+                sum1 += beta_Πij * BiTPj @ Bs[i]
+                sum2 += beta_Πij * BiTPj @ As[i]
 
                 # for d
-                X[j, i] = np.trace(Ps[j] @ CCi)
+                X[j, i] = np.trace(Pj @ CCi)
 
-            Fs[i][:, :] = solve(Qs[i] + sum1, sum2 + Ns[i])
+            Fs[i][:, :] = solve(Qi + sum1, sum2 + Ns[i])
+
 
         ds = solve(np.eye(m) - beta * Π,
                    np.diag(beta * Π @ X).reshape((m, 1))).flatten()

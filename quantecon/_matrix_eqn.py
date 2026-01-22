@@ -285,6 +285,14 @@ def solve_discrete_riccati_system(Π, As, Bs, Cs, Qs, Rs, Ns, beta,
     sum1, sum2 = np.empty((n, n)), np.empty((n, n))
 
     # == Main loop == #
+    
+    # Pre-compute transposes and invariant terms
+    As_T = np.array([A.T for A in As])
+    Bs_T = np.array([B.T for B in Bs])
+    Ns_T = np.array([N.T for N in Ns])
+    beta_Π = beta * Π
+
+    # == Main loop == #
     iteration = 0
     while error > tolerance:
 
@@ -295,14 +303,37 @@ def solve_discrete_riccati_system(Π, As, Bs, Cs, Qs, Rs, Ns, beta,
             error = 0
             for i in range(m):
                 # Initialize arrays
-                sum1[:, :] = 0.
-                sum2[:, :] = 0.
+                sum1.fill(0.)
+                sum2.fill(0.)
+                
+                Ai_T = As_T[i]
+                Bi_T = Bs_T[i]
+                Ni_T = Ns_T[i]
+                Qi = Qs[i]
+                Bi = Bs[i]
+                Ai = As[i]
+                
                 for j in range(m):
-                    sum1 += beta * Π[i, j] * As[i].T @ Ps[j] @ As[i]
-                    sum2 += Π[i, j] * \
-                            (beta * As[i].T @ Ps[j] @ Bs[i] + Ns[i].T) @ \
-                            solve(Qs[i] + beta * Bs[i].T @ Ps[j] @ Bs[i],
-                                  beta * Bs[i].T @ Ps[j] @ As[i] + Ns[i])
+                    Πij = Π[i, j]
+                    beta_Πij = beta_Π[i, j]
+                    Pj = Ps[j]
+                    
+                    # Compute Ai_T @ Pj @ Ai once
+                    ATPjA = Ai_T @ Pj @ Ai
+                    sum1 += beta_Πij * ATPjA
+                    
+                    # Compute Bi_T @ Pj once
+                    BTPj = Bi_T @ Pj
+                    
+                    # Compute denominator for solve
+                    denom = Qi + beta * BTPj @ Bi
+                    
+                    # Compute numerator for solve
+                    numer = beta * BTPj @ Ai + Ns[i]
+                    
+                    # Solve and accumulate
+                    sum2 += Πij * (beta * Ai_T @ Pj @ Bi + Ni_T) @ solve(denom, numer)
+
 
                 Ps1[i][:, :] = Rs[i] + sum1 - sum2
                 error += np.max(np.abs(Ps1[i] - Ps[i]))
