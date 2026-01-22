@@ -51,6 +51,22 @@ class LocalInteraction:
         self.tie_breaking = 'smallest'
 
     def _play(self, actions, player_ind, tie_breaking, tol, random_state):
+        if tie_breaking == 'smallest':
+            if tol is None:
+                tol = self.players[0].tol
+            
+            actions_onehot = np.eye(self.num_actions, dtype=int)[np.asarray(actions)]
+            opponent_act_dict = self.adj_matrix[player_ind].dot(actions_onehot)
+            payoff_matrix = self.players[0].payoff_array
+            payoffs = payoff_matrix @ opponent_act_dict.T
+            max_vals = payoffs.max(axis=0)
+            best_indices = (payoffs >= (max_vals - tol)).argmax(axis=0)
+            
+            for k, i in enumerate(player_ind):
+                actions[i] = int(best_indices[k])
+            
+            return actions
+        
         actions_matrix = sparse.csr_matrix(
             (np.ones(self.N, dtype=int), actions, np.arange(self.N+1)),
             shape=(self.N, self.num_actions))
