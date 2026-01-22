@@ -124,7 +124,7 @@ Examples
 """
 from collections import namedtuple
 import numpy as np
-from numba import jit
+from numba import njit, jit
 from .pivoting import _pivoting, _lex_min_ratio_test
 
 
@@ -463,7 +463,6 @@ def _set_criterion_row(c, basis, tableau):
     return tableau
 
 
-@jit(nopython=True, cache=True)
 def solve_tableau(tableau, basis, max_iter=10**6, skip_aux=True,
                   piv_options=PivOptions()):
     """
@@ -520,40 +519,15 @@ def solve_tableau(tableau, basis, max_iter=10**6, skip_aux=True,
         The number of iterations performed.
 
     """
-    L = tableau.shape[0] - 1
+    fea_tol = piv_options.fea_tol
+    tol_piv = piv_options.tol_piv
+    tol_ratio_diff = piv_options.tol_ratio_diff
 
-    # Array to store row indices in lex_min_ratio_test
-    argmins = np.empty(L, dtype=np.int_)
+    # Ensure max_iter is an int for the compiled function
+    max_iter = int(max_iter)
 
-    success = False
-    status = 1
-    num_iter = 0
-
-    while num_iter < max_iter:
-        num_iter += 1
-
-        pivcol_found, pivcol = _pivot_col(tableau, skip_aux, piv_options)
-
-        if not pivcol_found:  # Optimal
-            success = True
-            status = 0
-            break
-
-        aux_start = tableau.shape[1] - L - 1
-        pivrow_found, pivrow = _lex_min_ratio_test(
-            tableau[:-1, :], pivcol, aux_start, argmins,
-            piv_options.tol_piv, piv_options.tol_ratio_diff
-        )
-
-        if not pivrow_found:  # Unbounded
-            success = False
-            status = 3
-            break
-
-        _pivoting(tableau, pivcol, pivrow)
-        basis[pivrow] = pivcol
-
-    return success, status, num_iter
+    return _solve_tableau_njit(tableau, basis, max_iter, skip_aux,
+                               fea_tol, tol_piv, tol_ratio_diff)
 
 
 @jit(nopython=True, cache=True)
@@ -695,3 +669,72 @@ def get_solution(tableau, basis, x, lambd, b_signs):
     fun = tableau[-1, -1] * (-1)
 
     return fun
+
+
+@njit(cache=True)
+def _solve_tableau_njit(tableau, basis, max_iter, skip_aux,
+                        fea_tol, tol_piv, tol_ratio_diff):
+    """
+    Nopython implementation of the simplex tableau solver.
+
+    Parameters mirror the original solve_tableau except tolerances are passed
+    as scalar floats (extracted by the Python wrapper).
+    """
+    L = tableau.shape[0] - 1
+
+    # Array to store row indices in lex_min_ratio_test
+    argmins = np.empty(L, dtype=np.int_)
+
+    success = False
+    status = 1
+    num_iter = 0
+
+    while num_iter < max_iter:
+        num_iter += 1
+
+        pivcol_found, pivcol = _pivot_col_njit(tableau, skip_aux, fea_tol)
+
+
+        if not pivcol_found:  # Optimal
+            success = True
+            status = 0
+            break
+
+        aux_start = tableau.shape[1] - L - 1
+        pivrow_found, pivrow = _lex_min_ratio_test(
+            tableau[:-1, :], pivcol, aux_start, argmins,
+            tol_piv, tol_ratio_diff
+        )
+
+        if not pivrow_found:  # Unbounded
+            success = False
+            status = 3
+            break
+
+        _pivoting(tableau, pivcol, pivrow)
+        basis[pivrow] = pivcol
+
+    return success, status, num_iter
+
+
+@njit(cache=True)
+def _pivot_col_njit(tableau, skip_aux, fea_tol):
+    """
+    Nopython pivot column selection using scalar fea_tol.
+    """
+    L = tableau.shape[0] - 1
+    criterion_row_stop = tableau.shape[1] - 1
+    if skip_aux:
+        criterion_row_stop -= L
+
+    found = False
+    pivcol = -1
+    coeff = fea_tol
+    # iterate over candidate columns
+    for j in range(criterion_row_stop):
+        if tableau[-1, j] > coeff:
+            coeff = tableau[-1, j]
+            pivcol = j
+            found = True
+
+    return found, pivcol
