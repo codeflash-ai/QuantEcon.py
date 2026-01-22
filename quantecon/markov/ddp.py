@@ -370,7 +370,8 @@ class DiscreteDP:
             def s_wise_max(vals, out=None, out_argmax=None):
                 """
                 Return the vector max_a vals(s, a), where vals is represented
-                by a 1-dimensional ndarray of shape (self.num_sa_pairs,).
+                by a 2-dimensional ndarray of shape (n, m). Stored in out,
+                which must be of length self.num_states.
                 out and out_argmax must be of length self.num_states; dtype of
                 out_argmax must be int.
 
@@ -421,6 +422,11 @@ class DiscreteDP:
             self.s_wise_max = s_wise_max
 
         # Check that for every state, at least one action is feasible
+
+        # Check that for every state, at least one action is feasible
+        # Precompute reusable state index array to avoid allocating np.arange
+        # on every RQ_sigma call.
+        self._state_index = np.arange(self.num_states)
         self._check_action_feasibility()
 
         if not (0 <= beta <= 1):
@@ -562,8 +568,9 @@ class DiscreteDP:
                           out=sigma_indices)
             R_sigma, Q_sigma = self.R[sigma_indices], self.Q[sigma_indices]
         else:
-            R_sigma = self.R[np.arange(self.num_states), sigma]
-            Q_sigma = self.Q[np.arange(self.num_states), sigma]
+            R_sigma = self.R[self._state_index, sigma]
+            Q_sigma = self.Q[self._state_index, sigma]
+
 
         return R_sigma, Q_sigma
 
