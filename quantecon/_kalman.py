@@ -293,24 +293,29 @@ class Kalman:
         """
         # == simplify notation == #
         A, G = self.ss.A, self.ss.G
-        K_infinity = self.K_infinity
         # == compute and return coefficients == #
         coeffs = []
-        i = 1
         if coeff_type == 'ma':
             coeffs.append(np.identity(self.ss.k))
+            if j == 0:
+                return coeffs
             P_mat = A
-            P = np.identity(self.ss.n)  # Create a copy
+            K_infinity = self.K_infinity
+            M = G
         elif coeff_type == 'var':
+            K_infinity = self.K_infinity
             coeffs.append(G @ K_infinity)
             P_mat = A - (K_infinity @ G)
-            P = np.copy(P_mat)  # Create a copy
+            M = G @ P_mat
+            if j == 0:
+                return coeffs
         else:
             raise ValueError("Unknown coefficient type")
-        while i <= j:
-            coeffs.append((G @ P) @ K_infinity)
-            P = P @ P_mat
-            i += 1
+
+        for _ in range(j):
+            coeffs.append(M @ K_infinity)
+            M = M @ P_mat
+
         return coeffs
 
     def stationary_innovation_covar(self):
