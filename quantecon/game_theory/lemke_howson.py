@@ -295,21 +295,31 @@ def _initialize_tableaux(payoff_matrices, tableaux, bases):
         if min_ <= 0:
             consts[pl] = min_ * (-1) + 1
 
-    for pl, (py_start, sl_start) in enumerate(zip((0, nums_actions[0]),
-                                                  (nums_actions[0], 0))):
-        for i in range(nums_actions[1-pl]):
-            for j in range(nums_actions[pl]):
-                tableaux[pl][i, py_start+j] = \
-                    payoff_matrices[1-pl][i, j] + consts[1-pl]
-            for j in range(nums_actions[1-pl]):
-                if j == i:
-                    tableaux[pl][i, sl_start+j] = 1
-                else:
-                    tableaux[pl][i, sl_start+j] = 0
-            tableaux[pl][i, -1] = 1
+    # Player 0: py_start=0, sl_start=nums_actions[0]
+    for i in range(nums_actions[1]):
+        for j in range(nums_actions[0]):
+            tableaux[0][i, j] = \
+                payoff_matrices[1][i, j] + consts[1]
+        for j in range(nums_actions[1]):
+            tableaux[0][i, nums_actions[0]+j] = 0
+        tableaux[0][i, nums_actions[0]+i] = 1
+        tableaux[0][i, -1] = 1
 
-        for i in range(nums_actions[1-pl]):
-            bases[pl][i] = sl_start + i
+    for i in range(nums_actions[1]):
+        bases[0][i] = nums_actions[0] + i
+
+    # Player 1: py_start=nums_actions[0], sl_start=0
+    for i in range(nums_actions[0]):
+        for j in range(nums_actions[1]):
+            tableaux[1][i, nums_actions[0]+j] = \
+                payoff_matrices[0][i, j] + consts[0]
+        for j in range(nums_actions[0]):
+            tableaux[1][i, j] = 0
+        tableaux[1][i, i] = 1
+        tableaux[1][i, -1] = 1
+
+    for i in range(nums_actions[0]):
+        bases[1][i] = i
 
     return tableaux, bases
 
