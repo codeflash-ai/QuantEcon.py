@@ -29,6 +29,7 @@ a 3-player Minimum Effort Game
 """
 import numpy as np
 from .normal_form_game import Player, NormalFormGame
+import math
 
 
 def _str2num(s):
@@ -143,16 +144,44 @@ class GAMReader:
     def _parse(string):
         tokens = string.split()
 
-        N = int(tokens.pop(0))
-        nums_actions = tuple(int(tokens.pop(0)) for _ in range(N))
-        payoffs = np.array([_str2num(s) for s in tokens])
+        # Use an index pointer instead of repeated pop(0) calls
+        idx = 0
+        N = int(tokens[idx])
+        idx += 1
+        nums_actions = tuple(int(tokens[idx + i]) for i in range(N))
+        idx += N
 
-        na = np.prod(nums_actions)
+        tokens_remaining = tokens[idx:]
+        # Fast path: use numpy.fromstring for bulk numeric conversion when possible.
+        # Determine whether any token contains a decimal point according to the
+        # original _str2num logic (which treats presence of '.' as float).
+        if tokens_remaining:
+            has_dot = any('.' in s for s in tokens_remaining)
+            # Join tokens once for fromstring (C-implemented fast parser).
+            joined = ' '.join(tokens_remaining)
+            if has_dot:
+                payoffs = np.fromstring(joined, sep=' ', dtype=float)
+            else:
+                # Keep integer dtype when possible to preserve original behavior.
+                payoffs = np.fromstring(joined, sep=' ', dtype=int)
+
+            # If the fast parser didn't parse all tokens (e.g., due to an unparsable
+            # token), fall back to the original per-token conversion to raise the
+            # same exceptions and preserve behavior.
+            if payoffs.size != len(tokens_remaining):
+                payoffs = np.array([_str2num(s) for s in tokens_remaining])
+        else:
+            payoffs = np.array([], dtype=float)
+
+        na = math.prod(nums_actions)
         payoffs2d = payoffs.reshape(N, na)
+
+        # Precompute a template range for axis rotation
+        axes_template = tuple(range(N))
         players = [
             Player(
                 payoffs2d[i, :].reshape(nums_actions, order='F').transpose(
-                    (*range(i, N), *range(i))
+                    axes_template[i:] + axes_template[:i]
                 )
             ) for i in range(N)
         ]
