@@ -48,13 +48,29 @@ class IVP(integrate.ode):
     def _integrate_fixed_trajectory(self, h, T, step, relax):
         """Generates a solution trajectory of fixed length."""
         # initialize the solution using initial condition
-        solution = np.hstack((self.t, self.y))
+        # Keep the initial row exactly as original implementation did
+        initial_row = np.hstack((self.t, self.y))
+
+        # Collect rows in a list to avoid repeated reallocations via vstack.
+        # This preserves the original return shape: if no steps are taken,
+        # return the 1-D initial_row as before.
+        rows = [initial_row]
+
+        # Precompute size and dtype for efficient row allocation
+        ncols = initial_row.size
+        dtype = initial_row.dtype
+
 
         while self.successful():
 
             self.integrate(self.t + h, step, relax)
-            current_step = np.hstack((self.t, self.y))
-            solution = np.vstack((solution, current_step))
+
+            # create and fill a new row without performing concatenation ops
+            current_row = np.empty(ncols, dtype=dtype)
+            current_row[0] = self.t
+            current_row[1:] = self.y
+            rows.append(current_row)
+
 
             if (h > 0) and (self.t >= T):
                 break
@@ -63,6 +79,12 @@ class IVP(integrate.ode):
             else:
                 continue
 
+        # If only the initial row was collected, return it as a 1-D array
+        if len(rows) == 1:
+            return initial_row
+
+        # Stack once at the end to produce the final 2-D solution array
+        solution = np.vstack(rows)
         return solution
 
     def _integrate_variable_trajectory(self, h, g, tol, step, relax):
