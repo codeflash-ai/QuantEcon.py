@@ -38,7 +38,35 @@ def ckron(*arrays):
     Economics and Finance, MIT Press, 2002.
 
     """
-    return reduce(np.kron, arrays)
+    if not arrays or len(arrays) == 1:
+        return reduce(np.kron, arrays)
+
+    res = arrays[0]
+    for arr in arrays[1:]:
+        a = np.asarray(res)
+        b = np.asarray(arr)
+
+        na = a.ndim
+        nb = b.ndim
+        maxd = max(na, nb)
+        sa = (1,) * (maxd - na) + a.shape
+        sb = (1,) * (maxd - nb) + b.shape
+
+        a_shape_pairs = [0] * (2 * maxd)
+        b_shape_pairs = [0] * (2 * maxd)
+        for i in range(maxd):
+            idx = 2 * i
+            a_shape_pairs[idx] = sa[i]
+            a_shape_pairs[idx + 1] = 1
+            b_shape_pairs[idx] = 1
+            b_shape_pairs[idx + 1] = sb[i]
+
+        a_reshaped = a.reshape(tuple(a_shape_pairs))
+        b_reshaped = b.reshape(tuple(b_shape_pairs))
+        final_shape = tuple(sa_i * sb_i for sa_i, sb_i in zip(sa, sb))
+        res = (a_reshaped * b_reshaped).reshape(final_shape)
+
+    return res
 
 
 def gridmake(*arrays):
