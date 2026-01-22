@@ -206,12 +206,48 @@ class GAMWriter:
         s = str(g.N) + '\n'
         s += ' '.join(map(str, g.nums_actions)) + '\n\n'
 
+
+        # Collect flattened payoff blocks and detect if all dtypes match.
+        flattened_blocks = []
+        dtype0 = None
+        homogeneous_dtype = True
+
         for i, player in enumerate(g.players):
-            payoffs = np.array2string(
-                player.payoff_array.transpose(
-                    (*range(g.N-i, g.N), *range(g.N-i))
-                ).ravel(order='F'))[1:-1]
+            # Preserve original axis permutation logic.
+            axes = (*range(g.N - i, g.N), *range(g.N - i))
+            flat = player.payoff_array.transpose(axes).ravel(order='F')
+            flattened_blocks.append(flat)
+
+            if dtype0 is None:
+                dtype0 = flat.dtype
+            elif flat.dtype != dtype0:
+                homogeneous_dtype = False
+
+        # If there are no players just return the header trimmed as original did.
+        if not flattened_blocks:
+            return s.rstrip()
+
+        if homogeneous_dtype:
+            # Concatenate and format once to avoid repeated array2string overhead.
+            # This preserves formatting because all blocks share the same dtype.
+            try:
+                all_flat = np.concatenate(flattened_blocks)
+            except ValueError:
+                # In the unlikely event concatenation fails (e.g., zero-sized arrays with
+                # incompatible shapes), fall back to the original per-block behavior.
+                homogeneous_dtype = False
+
+        if homogeneous_dtype:
+            payoffs = np.array2string(all_flat)[1:-1]
             s += ' '.join(payoffs.split()) + ' '
+        else:
+            # Fallback: preserve original behavior exactly when dtypes differ.
+            for i, player in enumerate(g.players):
+                payoffs = np.array2string(
+                    player.payoff_array.transpose(
+                        (*range(g.N-i, g.N), *range(g.N-i))
+                    ).ravel(order='F'))[1:-1]
+                s += ' '.join(payoffs.split()) + ' '
 
         return s.rstrip()
 
